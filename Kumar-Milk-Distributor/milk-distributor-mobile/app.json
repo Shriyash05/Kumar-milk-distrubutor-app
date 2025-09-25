@@ -32,6 +32,8 @@
       "versionCode": 1,
       "permissions": [
         "INTERNET",
+        "ACCESS_NETWORK_STATE",
+        "INTERNET",
         "ACCESS_NETWORK_STATE"
       ]
     },
@@ -50,6 +52,12 @@
       "eas": {
         "projectId": "80d70b6e-6b86-4127-a82e-195e040dabc6"
       }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/80d70b6e-6b86-4127-a82e-195e040dabc6"
     }
   }
 }
