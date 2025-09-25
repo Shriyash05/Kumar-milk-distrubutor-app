@@ -18,7 +18,10 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.kumarmilk.distributor",
-      "buildNumber": "1"
+      "buildNumber": "1",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -43,7 +46,10 @@
     "extra": {
       "apiBaseUrl": "https://api-kumarmilk.vercel.app/api",
       "enableDemoMode": false,
-      "ENV": "production"
+      "ENV": "production",
+      "eas": {
+        "projectId": "80d70b6e-6b86-4127-a82e-195e040dabc6"
+      }
     }
   }
 }
