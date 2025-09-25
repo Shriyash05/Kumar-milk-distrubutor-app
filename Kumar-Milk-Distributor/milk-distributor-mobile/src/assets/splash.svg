@@ -1,0 +1,40 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background circle -->
+  <circle cx="256" cy="256" r="240" fill="#54a9f7" stroke="#2196F3" stroke-width="8"/>
+  
+  <!-- Inner circle for contrast -->
+  <circle cx="256" cy="256" r="220" fill="rgba(255,255,255,0.1)" stroke="rgba(255,255,255,0.2)" stroke-width="2"/>
+  
+  <!-- Milk drop shape -->
+  <path d="M256 120 C220 120, 190 140, 190 180 C190 220, 220 250, 256 260 C292 250, 322 220, 322 180 C322 140, 292 120, 256 120 Z" fill="white" opacity="0.95"/>
+  
+  <!-- Inner milk drop highlight -->
+  <path d="M256 140 C235 140, 218 155, 218 175 C218 195, 235 210, 256 215 C277 210, 294 195, 294 175 C294 155, 277 140, 256 140 Z" fill="rgba(54,169,247,0.2)"/>
+  
+  <!-- Company name - KUMAR -->
+  <text x="256" y="320" font-family="Arial, sans-serif" font-size="48" font-weight="bold" text-anchor="middle" fill="white">KUMAR</text>
+  
+  <!-- Subtitle - MILK DISTRIBUTORS -->
+  <text x="256" y="360" font-family="Arial, sans-serif" font-size="24" text-anchor="middle" fill="white" opacity="0.9">MILK DISTRIBUTORS</text>
+  
+  <!-- Tagline -->
+  <text x="256" y="390" font-family="Arial, sans-serif" font-size="14" text-anchor="middle" fill="white" opacity="0.7">Fresh • Pure • Delivered Daily</text>
+  
+  <!-- Decorative elements - milk bubbles -->
+  <circle cx="180" cy="200" r="8" fill="rgba(255,255,255,0.6)"/>
+  <circle cx="332" cy="220" r="6" fill="rgba(255,255,255,0.6)"/>
+  <circle cx="200" cy="340" r="5" fill="rgba(255,255,255,0.4)"/>
+  <circle cx="312" cy="350" r="5" fill="rgba(255,255,255,0.4)"/>
+  <circle cx="160" cy="300" r="4" fill="rgba(255,255,255,0.3)"/>
+  <circle cx="352" cy="290" r="4" fill="rgba(255,255,255,0.3)"/>
+  
+  <!-- Bottom decorative wave -->
+  <path d="M80 420 Q150 410, 220 420 T380 420 T512 420 L512 460 L80 460 Z" fill="rgba(255,255,255,0.1)"/>
+  
+  <!-- Top decorative elements -->
+  <path d="M80 140 Q150 130, 220 140 T380 140" stroke="rgba(255,255,255,0.2)" stroke-width="3" fill="none"/>
+  
+  <!-- Side milk drops -->
+  <ellipse cx="140" cy="160" rx="12" ry="20" fill="rgba(255,255,255,0.3)" transform="rotate(-20 140 160)"/>
+  <ellipse cx="372" cy="160" rx="12" ry="20" fill="rgba(255,255,255,0.3)" transform="rotate(20 372 160)"/>
+</svg>

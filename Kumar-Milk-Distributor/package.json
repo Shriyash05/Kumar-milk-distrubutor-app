@@ -1,0 +1,38 @@
+{
+  "name": "kumar-milk-backend",
+  "version": "1.0.0",
+  "description": "Backend API for Kumar Milk Distributor Mobile App",
+  "main": "mobile-backend-server.js",
+  "scripts": {
+    "start": "node mobile-backend-server.js",
+    "dev": "nodemon mobile-backend-server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "milk",
+    "delivery",
+    "api",
+    "mongodb",
+    "express"
+  ],
+  "author": "Kumar Milk Distributors",
+  "license": "ISC",
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "expo-print": "^15.0.7",
+    "expo-sharing": "^14.0.7",
+    "express": "^4.18.2",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.0.0",
+    "pdfkit": "^0.17.2",
+    "react-native-print": "^0.11.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}

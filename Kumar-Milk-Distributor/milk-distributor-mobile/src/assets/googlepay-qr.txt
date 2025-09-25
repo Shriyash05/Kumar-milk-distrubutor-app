@@ -1,0 +1,12 @@
+This file represents the Google Pay QR code for UPI ID: shreyy954@okaxis
+
+The actual QR code image should be saved as googlepay-qr.png in this assets folder.
+Since I cannot directly save binary image data, please:
+
+1. Save the QR code image you shared as 'googlepay-qr.png' in the assets folder
+2. Then uncomment the Image component in GooglePayQR.js (lines 82-87)
+
+The QR code contains:
+- UPI ID: shreyy954@okaxis
+- Merchant: Kumar Milk Distributors
+- Dynamic amount and order details will be added via UPI URL generation

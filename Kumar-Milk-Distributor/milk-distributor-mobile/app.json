@@ -1,0 +1,52 @@
+{
+  "expo": {
+    "name": "Kumar Milk Distributors",
+    "slug": "kumar-milk-distributors",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#54a9f7"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.kumarmilk.distributor",
+      "buildNumber": "1"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#54a9f7"
+      },
+      "package": "com.kumarmilk.distributor",
+      "versionCode": 1,
+      "permissions": [
+        "INTERNET",
+        "ACCESS_NETWORK_STATE"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-secure-store"
+    ],
+    "scheme": "kumar-milk-distributor",
+    "extra": {
+      "eas": {
+        "projectId": "your-project-id-here"
+      },
+      "apiBaseUrl": "https://kumar-milk-distributors.onrender.com/api",
+      "enableDemoMode": false,
+      "ENV": "production"
+    }
+  }
+}
