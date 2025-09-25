@@ -114,26 +114,31 @@ class NotificationService {
   async notifyAdminNewOrder(orderData) {
     console.log('🗑️ Admin Notification: New order alert sent');
     
+    // Safe fallback values
+    const customerName = orderData.customerName || orderData.customer?.name || 'Unknown Customer';
+    const totalAmount = orderData.totalAmount || 0;
+    const orderId = orderData.id || orderData._id || orderData.orderGroupId || 'Unknown';
+    
     // Handle both single and multi-product orders
     let orderDescription = '';
     if (orderData.items && Array.isArray(orderData.items) && orderData.items.length > 0) {
       // Multi-product order
-      const totalItems = orderData.items.reduce((sum, item) => sum + item.quantity, 0);
-      orderDescription = `${orderData.customerName} ordered ${orderData.items.length} different products (${totalItems} total items)`;
+      const totalItems = orderData.items.reduce((sum, item) => sum + (item.quantity || 0), 0);
+      orderDescription = `${customerName} ordered ${orderData.items.length} different products (${totalItems} total items)`;
     } else if (orderData.productName && orderData.quantity) {
       // Single product order
-      orderDescription = `${orderData.customerName} ordered ${orderData.quantity}${orderData.unitType === 'crate' ? ' crates' : 'L'} of ${orderData.productName}`;
+      orderDescription = `${customerName} ordered ${orderData.quantity}${orderData.unitType === 'crate' ? ' crates' : 'L'} of ${orderData.productName}`;
     } else {
       // Fallback
-      orderDescription = `${orderData.customerName} placed a new order`;
+      orderDescription = `${customerName} placed a new order`;
     }
     
     return this.sendLocalNotification(
       '🍼 New Milk Order!',
-      `${orderDescription}\nAmount: ₹${orderData.totalAmount}`,
+      `${orderDescription}\nAmount: ₹${totalAmount}`,
       {
         type: 'admin_new_order',
-        orderId: orderData.id,
+        orderId: orderId,
         priority: 'high',
         sound: 'default',
         ...orderData
@@ -142,13 +147,19 @@ class NotificationService {
   }
 
   async notifyAdminPaymentProof(orderData) {
-    console.log('🗎 Admin Notification: Payment proof alert sent');
+    console.log('🗗 Admin Notification: Payment proof alert sent');
+    
+    // Safe fallback values
+    const customerName = orderData.customerName || orderData.customer?.name || 'Unknown Customer';
+    const totalAmount = orderData.totalAmount || 0;
+    const orderId = orderData.id || orderData._id || orderData.orderGroupId || 'Unknown';
+    
     return this.sendLocalNotification(
       '💳 Payment Proof Received',
-      `Payment screenshot uploaded for order #${orderData.id}\nCustomer: ${orderData.customerName}\nAmount: ₹${orderData.totalAmount}`,
+      `Payment screenshot uploaded for order #${orderId}\nCustomer: ${customerName}\nAmount: ₹${totalAmount}`,
       {
         type: 'admin_payment_proof',
-        orderId: orderData.id,
+        orderId: orderId,
         priority: 'high',
         sound: 'default',
         ...orderData

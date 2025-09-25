@@ -1,14 +1,23 @@
 import * as SecureStore from 'expo-secure-store';
 import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import ApiConfig from '../config/apiConfig';
 
 class SimpleAuthService {
   constructor() {
-    this.apiBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL || 'http://192.168.1.124:5000/api';
+    // Use central API configuration
+    this.apiBaseUrl = ApiConfig.getURL();
+    this.isInitialized = true;
     console.log('Simple Auth Service initialized with API URL:', this.apiBaseUrl);
   }
 
-  // Retry logic for critical operations
+  async ensureInitialized() {
+    // Always return the current API URL from central config
+    this.apiBaseUrl = ApiConfig.getURL();
+    return this.apiBaseUrl;
+  }
+
+  // ================== Core Request Logic ==================
   async makeRequestWithRetry(endpoint, options = {}, maxRetries = 3) {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
@@ -17,123 +26,73 @@ class SimpleAuthService {
         console.log(`✅ Success on attempt ${attempt} for ${endpoint}`);
         return result;
       } catch (error) {
-        console.log(`❌ Attempt ${attempt}/${maxRetries} failed for ${endpoint}:`, error.message);
-        
-        if (attempt === maxRetries) {
-          throw error;
+        console.log(`❌ Attempt ${attempt} failed for ${endpoint}:`, error.message);
+
+        // Switch to tunnel if LAN fails
+        if ((error.name === 'AbortError' || error.message.includes('Network request failed')) && !this.tunnelApiBaseUrl) {
+          this.tunnelApiBaseUrl = Constants.manifest?.debuggerHost
+            ? `https://${Constants.manifest.debuggerHost.split(':')[0]}.tunnel.expo.dev/api`
+            : null;
+
+          if (this.tunnelApiBaseUrl) {
+            console.log('🌐 Switching to Expo tunnel API URL:', this.tunnelApiBaseUrl);
+            this.apiBaseUrl = this.tunnelApiBaseUrl;
+          }
         }
-        
-        // Exponential backoff: wait longer between retries
+
+        if (attempt === maxRetries) throw error;
+
+        // Exponential backoff
         const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
         console.log(`⏳ Waiting ${delay}ms before retry...`);
-        await new Promise(resolve => setTimeout(resolve, delay));
+        await new Promise(res => setTimeout(res, delay));
       }
     }
   }
 
-  // Make API request with timeout and error handling
   async makeRequest(endpoint, options = {}) {
+    await this.ensureInitialized();
     const url = `${this.apiBaseUrl}${endpoint}`;
-    
     const config = {
       headers: {
         'Content-Type': 'application/json',
         ...options.headers,
       },
-      timeout: 30000, // Increased timeout to 30 seconds
       ...options,
     };
 
-  // Add auth token if available - try multiple approaches
-    let token = options.headers && options.headers.Authorization ? 
-      options.headers.Authorization.replace('Bearer ', '') : null;
-    
-    if (!token) {
-      token = await this.getStoredToken();
-    }
-    
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    } else {
-      console.warn('⚠️ No authentication token available for request to:', endpoint);
-    }
+    let token = options.headers?.Authorization?.replace('Bearer ', '') || (await this.getStoredToken());
+    if (token) config.headers.Authorization = `Bearer ${token}`;
 
     try {
-      console.log(`Making request to: ${url}`);
+      console.log('Making request to:', url);
       console.log('Request headers:', config.headers);
-      
-      const controller = new AbortController();
-      // Longer timeout for critical operations like orders (60 seconds)
-      const isOrderOperation = url.includes('/customer/orders') || url.includes('/admin/');
-      const timeoutDuration = isOrderOperation ? 60000 : 30000;
-      const timeoutId = setTimeout(() => controller.abort(), timeoutDuration);
-      
-      const response = await fetch(url, {
-        ...config,
-        signal: controller.signal,
-      });
-      
-      clearTimeout(timeoutId);
-      
-      // Log response headers and status for debugging
-      console.log('Response status:', response.status);
-      console.log('Response headers:', response.headers);
-      
-      // Check if response is JSON
-      const contentType = response.headers.get('content-type');
-      if (!contentType || !contentType.includes('application/json')) {
-        const textResponse = await response.text();
-        console.error('Non-JSON response received:', textResponse);
-        throw new Error(`Server returned non-JSON response: ${textResponse.substring(0, 200)}...`);
-      }
-      
-      const data = await response.json();
-      
-      if (!response.ok) {
-        // Log detailed error information for debugging
-        console.error('API Error Details:', {
-          status: response.status,
-          statusText: response.statusText,
-          errorData: data,
-          url: url
-        });
-        
-        // If it's a validation error, show more details
-        if (data.errors || data.validationErrors || data.required) {
-          console.error('Validation Details:', {
-            errors: data.errors,
-            validationErrors: data.validationErrors, 
-            required: data.required,
-            missing: data.missing
-          });
-        }
-        
-        throw new Error(data.message || `HTTP ${response.status}: ${response.statusText}`);
-      }
 
-      console.log(`Request successful: ${url}`);
+      const controller = new AbortController();
+      const timeoutDuration = url.includes('/customer/orders') || url.includes('/admin/') ? 60000 : 30000;
+      const timeoutId = setTimeout(() => controller.abort(), timeoutDuration);
+
+      const response = await fetch(url, { ...config, signal: controller.signal });
+      clearTimeout(timeoutId);
+
+      const contentType = response.headers.get('content-type') || '';
+      const data = contentType.includes('application/json') ? await response.json() : await response.text();
+
+      if (!response.ok) throw new Error(data.message || `HTTP ${response.status}: ${response.statusText}`);
+
       return data;
     } catch (error) {
       console.error(`Request failed for ${url}:`, error);
-      
-      if (error.name === 'AbortError') {
-        throw new Error('Request timeout. Please check your connection.');
-      }
-      
-      if (error.message === 'Network request failed') {
-        throw new Error('Unable to connect to server. Please check your internet connection.');
-      }
-      
+      if (error.name === 'AbortError') throw new Error('Request timeout. Please check your connection.');
+      if (error.message.includes('Network request failed')) throw new Error('Unable to connect to server. Please check your internet.');
       throw error;
     }
   }
 
-  // Register new user
+  // ================== Authentication ==================
   async register(userData) {
     try {
       const { name, email, password, phone, address } = userData;
-
-      // Basic validation
       if (!name?.trim()) throw new Error('Name is required');
       if (!this.validateEmail(email)) throw new Error('Please enter a valid email address');
       if (!password || password.length < 6) throw new Error('Password must be at least 6 characters long');
@@ -154,12 +113,10 @@ class SimpleAuthService {
         }),
       });
 
-      // Store user data locally for admin dashboard metrics
       try {
         const existingUsers = await AsyncStorage.getItem('registeredUsers');
         const users = existingUsers ? JSON.parse(existingUsers) : [];
-        
-        const newUser = {
+        users.push({
           _id: response.user._id || Date.now().toString(),
           name: name.trim(),
           email: email.toLowerCase().trim(),
@@ -167,39 +124,24 @@ class SimpleAuthService {
           address: address.trim(),
           role: 'customer',
           registrationDate: new Date().toISOString(),
-        };
-        
-        users.push(newUser);
+        });
         await AsyncStorage.setItem('registeredUsers', JSON.stringify(users));
         console.log('📋 Stored user data locally for dashboard metrics');
       } catch (storageError) {
-        console.log('⚠️ Failed to store user data locally:', storageError.message);
+        console.warn('⚠️ Failed to store user data locally:', storageError.message);
       }
 
-      return {
-        success: true,
-        user: response.user,
-        message: response.message
-      };
+      return { success: true, user: response.user, message: response.message };
     } catch (error) {
       console.error('Registration error:', error);
-      return {
-        success: false,
-        error: error.message || 'Registration failed'
-      };
+      return { success: false, error: error.message || 'Registration failed' };
     }
   }
 
-  // Login user
   async login(email, password) {
     try {
-      if (!this.validateEmail(email)) {
-        throw new Error('Please enter a valid email address');
-      }
-      
-      if (!password || password.length < 6) {
-        throw new Error('Password must be at least 6 characters long');
-      }
+      if (!this.validateEmail(email)) throw new Error('Please enter a valid email address');
+      if (!password || password.length < 6) throw new Error('Password must be at least 6 characters long');
 
       const response = await this.makeRequest('/auth/login', {
         method: 'POST',
@@ -211,35 +153,21 @@ class SimpleAuthService {
         }),
       });
 
-      // Store authentication data
       await this.storeAuthData(response);
-      
       console.log('Login successful, stored user data:', response.user);
-
-      return {
-        success: true,
-        user: response.user,
-        token: response.token
-      };
+      return { success: true, user: response.user, token: response.token };
     } catch (error) {
       console.error('Login error:', error);
-      
-      return {
-        success: false,
-        error: error.message || 'Login failed'
-      };
+      return { success: false, error: error.message || 'Login failed' };
     }
   }
 
-
-  // Store authentication data
   async storeAuthData(authData) {
     try {
       await SecureStore.setItemAsync('userData', JSON.stringify(authData.user));
       await SecureStore.setItemAsync('authToken', authData.token);
       await SecureStore.setItemAsync('userRole', authData.user.role);
       await SecureStore.setItemAsync('loginTimestamp', Date.now().toString());
-      
       console.log('Auth data stored successfully');
     } catch (error) {
       console.error('Store auth data error:', error);
@@ -247,7 +175,6 @@ class SimpleAuthService {
     }
   }
 
-  // Get current user
   async getCurrentUser() {
     try {
       const userData = await SecureStore.getItemAsync('userData');
@@ -258,7 +185,6 @@ class SimpleAuthService {
     }
   }
 
-  // Get stored token
   async getStoredToken() {
     try {
       return await SecureStore.getItemAsync('authToken');
@@ -268,7 +194,6 @@ class SimpleAuthService {
     }
   }
 
-  // Check if user is authenticated
   async isAuthenticated() {
     try {
       const userData = await SecureStore.getItemAsync('userData');
@@ -280,22 +205,15 @@ class SimpleAuthService {
     }
   }
 
-  // Logout user
   async logout() {
     try {
-      // Try to logout from server (optional)
       try {
         await this.makeRequest('/auth/logout', { method: 'POST' });
-      } catch (error) {
-        console.log('Server logout failed (continuing with local logout)');
-      }
-
-      // Clear local storage
+      } catch (_) {}
       await SecureStore.deleteItemAsync('userData');
       await SecureStore.deleteItemAsync('authToken');
       await SecureStore.deleteItemAsync('userRole');
       await SecureStore.deleteItemAsync('loginTimestamp');
-      
       console.log('User logged out successfully');
       return { success: true };
     } catch (error) {
@@ -304,167 +222,88 @@ class SimpleAuthService {
     }
   }
 
-  // Update user profile
+  // ================== Profile ==================
   async updateProfile(profileData) {
     try {
-      console.log('updateProfile called with data:', profileData);
       const token = await this.getStoredToken();
-      console.log('Stored token for profile update:', token ? 'Present' : 'Missing');
-      
       const response = await this.makeRequest('/user/profile', {
         method: 'PUT',
         body: JSON.stringify(profileData),
       });
-      
-      console.log('Profile update response:', response);
 
       if (response.success && response.user) {
-        // Update stored user data with the new profile data
         const currentUser = await this.getCurrentUser();
-        const updatedUser = {
-          ...currentUser,
-          ...response.user,
-          _id: response.user.id || currentUser._id, // Ensure _id is preserved
-        };
+        const updatedUser = { ...currentUser, ...response.user, _id: response.user.id || currentUser._id };
         await SecureStore.setItemAsync('userData', JSON.stringify(updatedUser));
-        
-        return {
-          success: true,
-          user: updatedUser
-        };
-      } else {
-        throw new Error(response.message || 'Profile update failed');
-      }
+        return { success: true, user: updatedUser };
+      } else throw new Error(response.message || 'Profile update failed');
     } catch (error) {
       console.error('Update profile error:', error);
-      return {
-        success: false,
-        error: error.message || 'Failed to update profile'
-      };
+      return { success: false, error: error.message || 'Failed to update profile' };
     }
   }
 
-  // Get user dashboard data
+  // ================== Dashboard ==================
   async getDashboardData() {
     try {
       const response = await this.makeRequest('/customer/dashboard');
-      return {
-        success: true,
-        data: response
-      };
+      return { success: true, data: response };
     } catch (error) {
-      console.error('Dashboard data error:', error);
-      // Return mock data for demo
+      console.warn('Dashboard data error, returning mock:', error.message);
       return this.getMockDashboardData();
     }
   }
 
-  // Get mock dashboard data (fallback)
   getMockDashboardData() {
     return {
       success: true,
       data: {
         orders: [
-          {
-            _id: '1',
-            productName: 'Full Cream Milk',
-            quantity: 2,
-            totalAmount: 120,
-            status: 'delivered',
-            createdAt: '2025-01-15T10:00:00Z',
-            deliveryDate: '2025-01-15'
-          },
-          {
-            _id: '2',
-            productName: 'Toned Milk',
-            quantity: 1,
-            totalAmount: 50,
-            status: 'pending',
-            createdAt: '2025-01-14T10:00:00Z',
-            deliveryDate: '2025-01-16'
-          }
+          { _id: '1', productName: 'Full Cream Milk', quantity: 2, totalAmount: 120, status: 'delivered', createdAt: '2025-01-15T10:00:00Z', deliveryDate: '2025-01-15' },
+          { _id: '2', productName: 'Toned Milk', quantity: 1, totalAmount: 50, status: 'pending', createdAt: '2025-01-14T10:00:00Z', deliveryDate: '2025-01-16' },
         ],
-        stats: {
-          totalOrders: 2,
-          deliveredOrders: 1,
-          pendingOrders: 1,
-          totalSpent: 170
-        }
-      }
+        stats: { totalOrders: 2, deliveredOrders: 1, pendingOrders: 1, totalSpent: 170 },
+      },
     };
   }
 
-  // Admin: Get all users for reports
+  // ================== Admin ==================
   async getAllUsers() {
     try {
-      // Check if user is admin before making the request
       const currentUser = await this.getCurrentUser();
-      if (!currentUser || currentUser.role !== 'admin') {
-        console.log('🚫 Customer attempted to access admin users - blocked');
-        throw new Error('Admin access required');
-      }
-      
+      if (!currentUser || currentUser.role !== 'admin') throw new Error('Admin access required');
+
       const response = await this.makeRequest('/admin/users');
-      return {
-        success: true,
-        users: response.users
-      };
+      return { success: true, users: response.users };
     } catch (error) {
       console.error('Get users error:', error);
-      return {
-        success: false,
-        error: error.message || 'Failed to get users'
-      };
+      return { success: false, error: error.message || 'Failed to get users' };
     }
   }
 
-  // Admin: Get admin dashboard stats
   async getAdminDashboard() {
     try {
-      // Check if user is admin before making the request
       const currentUser = await this.getCurrentUser();
-      if (!currentUser || currentUser.role !== 'admin') {
-        console.log('🚫 Customer attempted to access admin dashboard - blocked');
-        throw new Error('Admin access required');
-      }
-      
+      if (!currentUser || currentUser.role !== 'admin') throw new Error('Admin access required');
+
       const response = await this.makeRequest('/admin/dashboard');
-      return {
-        success: true,
-        data: response
-      };
+      return { success: true, data: response };
     } catch (error) {
-      console.error('Admin dashboard error:', error);
-      // Only return mock data for actual admins
+      console.warn('Admin dashboard error, returning mock:', error.message);
       const currentUser = await this.getCurrentUser();
-      if (currentUser && currentUser.role === 'admin') {
-        return this.getMockAdminDashboard();
-      } else {
-        return {
-          success: false,
-          error: 'Admin access required'
-        };
-      }
+      if (currentUser && currentUser.role === 'admin') return this.getMockAdminDashboard();
+      return { success: false, error: 'Admin access required' };
     }
   }
 
-  // Get mock admin dashboard (fallback)
   getMockAdminDashboard() {
     return {
       success: true,
-      data: {
-        totalCustomers: 150,
-        totalOrders: 300,
-        pendingOrders: 25,
-        deliveredOrders: 250,
-        totalRevenue: 15000,
-        todayOrders: 12,
-        monthlyGrowth: 15.5
-      }
+      data: { totalCustomers: 150, totalOrders: 300, pendingOrders: 25, deliveredOrders: 250, totalRevenue: 15000, todayOrders: 12, monthlyGrowth: 15.5 },
     };
   }
 
-  // Utility functions
+  // ================== Utils ==================
   validateEmail(email) {
     const regex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     return regex.test(email);

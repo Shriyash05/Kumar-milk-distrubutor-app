@@ -65,14 +65,35 @@ export default function MyOrdersScreen({ navigation }) {
       const res = await simpleAuthService.makeRequest("/customer/orders");
       const allOrders = Array.isArray(res) ? res : res.orders || [];
 
-      // Filter only logged-in user orders
-      const userOrders = allOrders.filter(
-        (o) => o.customer === userData._id || o.customer === userData.id
-      );
+      console.log('📱 Mobile app received orders:', allOrders.length);
+      if (allOrders.length > 0) {
+        console.log('📱 Sample order from server:');
+        console.log('- Full order object keys:', Object.keys(allOrders[0]));
+        console.log('- Customer ID:', allOrders[0].customer);
+        console.log('- User ID from storage:', userData._id);
+        console.log('- Product Name:', allOrders[0].productName);
+        console.log('- Order Group ID:', allOrders[0].orderGroupId);
+        console.log('- Created At:', allOrders[0].createdAt);
+        console.log('- Order Source:', allOrders[0].orderSource);
+        console.log('- Status:', allOrders[0].status);
+      }
 
-      setOrders(userOrders);
+      // Server already filters by user, no need for client-side filtering
+      setOrders(allOrders);
     } catch (e) {
       console.error("Error loading orders:", e);
+      if (e.message && e.message.includes('Invalid token')) {
+        Toast.show({ 
+          type: "error", 
+          text1: "Session expired", 
+          text2: "Please log in again" 
+        });
+        // Clear stored auth data and redirect to login
+        await SecureStore.deleteItemAsync('authToken');
+        await SecureStore.deleteItemAsync('userData');
+        navigation.replace('Landing');
+        return;
+      }
       Toast.show({ type: "error", text1: "Failed to load orders" });
     } finally {
       setLoading(false);
@@ -91,16 +112,41 @@ export default function MyOrdersScreen({ navigation }) {
 
   /* ---------- Group Orders ---------- */
   const groupedOrders = React.useMemo(() => {
-    if (!orders || orders.length === 0) return [];
+    console.log('📝 Processing orders for grouping:', orders.length);
+    if (!orders || orders.length === 0) {
+      console.log('❌ No orders to group');
+      return [];
+    }
 
     const groups = {};
-    orders.forEach((o) => {
-      const key = o.orderGroupId || `${o.customer}_${new Date(o.orderDate || o.createdAt).toDateString()}`;
+    orders.forEach((o, index) => {
+      // Create a unique key that ensures orders with different payment proofs are grouped separately
+      let key;
+      
+      if (o.orderGroupId) {
+        // If order has a specific group ID, use it
+        key = o.orderGroupId;
+      } else {
+        // Create unique key based on customer, date, and payment proof
+        const customerKey = o.customer || 'user';
+        const dateKey = new Date(o.orderDate || o.createdAt || Date.now()).toDateString();
+        const proofKey = (o.paymentProof && typeof o.paymentProof === 'object' && o.paymentProof.imageUri) 
+          ? `_proof_${o.paymentProof.imageUri.substring(o.paymentProof.imageUri.lastIndexOf('/') + 1, o.paymentProof.imageUri.lastIndexOf('.')) || 'img'}` 
+          : '_no_proof';
+        const statusKey = o.status || 'pending';
+        
+        // Include order creation time to ensure each separate order session creates a new group
+        const timeKey = new Date(o.createdAt || Date.now()).getTime();
+        const roundedTimeKey = Math.floor(timeKey / (5 * 60 * 1000)) * (5 * 60 * 1000); // Round to 5-minute intervals
+        
+        key = `${customerKey}_${dateKey}_${statusKey}_${roundedTimeKey}${proofKey}`;
+      }
+      
       if (!groups[key]) groups[key] = [];
       groups[key].push(o);
     });
 
-    return Object.entries(groups).map(([groupId, items]) => {
+    const groupedResult = Object.entries(groups).map(([groupId, items]) => {
       const allItems = items.flatMap((i) =>
         i.items && Array.isArray(i.items)
           ? i.items
@@ -125,6 +171,18 @@ export default function MyOrdersScreen({ navigation }) {
         new Date(b.orders[0]?.orderDate || b.orders[0]?.createdAt) -
         new Date(a.orders[0]?.orderDate || a.orders[0]?.createdAt)
     );
+    
+    console.log('📦 Created', groupedResult.length, 'order groups');
+    if (groupedResult.length > 0) {
+      console.log('🔍 Sample group:', {
+        groupId: groupedResult[0].groupId,
+        itemsCount: groupedResult[0].items.length,
+        totalAmount: groupedResult[0].totalAmount,
+        status: groupedResult[0].status
+      });
+    }
+    
+    return groupedResult;
   }, [orders]);
 
   const getStatusColor = (s) =>

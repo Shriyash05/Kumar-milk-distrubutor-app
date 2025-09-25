@@ -46,6 +46,117 @@ const AdminDashboard = ({ navigation }) => {
     return '₹' + formatNumber(value, 2);
   };
   
+  // Helper function to get status color
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'pending_verification':
+      case 'pending':
+        return '#FF9800';
+      case 'confirmed':
+        return '#2196F3';
+      case 'processing':
+        return '#9C27B0';
+      case 'out_for_delivery':
+        return '#00BCD4';
+      case 'delivered':
+        return '#4CAF50';
+      case 'cancelled':
+        return '#f44336';
+      default:
+        return '#757575';
+    }
+  };
+  
+  // Helper function to get status display text
+  const getStatusDisplayText = (status) => {
+    switch (status) {
+      case 'pending_verification':
+        return 'Pending';
+      case 'pending':
+        return 'New';
+      case 'confirmed':
+        return 'Confirmed';
+      case 'processing':
+        return 'Processing';
+      case 'out_for_delivery':
+        return 'Out for Delivery';
+      case 'delivered':
+        return 'Delivered';
+      case 'cancelled':
+        return 'Cancelled';
+      default:
+        return status || 'Unknown';
+    }
+  };
+  
+  // Function to group recent orders similar to AdminOrdersScreen
+  const groupRecentOrders = (orders) => {
+    if (!orders || orders.length === 0) {
+      return [];
+    }
+    
+    console.log('📝 AdminDashboard: Grouping', orders.length, 'recent orders...');
+    
+    const groups = {};
+    orders.forEach((order, index) => {
+      // Create a unique key similar to AdminOrdersScreen
+      const key = order.orderGroupId || 
+                  `${order.customerName || 'user'}_${new Date(order.orderDate || order.createdAt || order.timestamp || Date.now()).toDateString()}` || 
+                  `order_${index}_${Date.now()}`;
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(order);
+    });
+    
+    const groupedResult = Object.entries(groups).map(([groupId, items]) => {
+      const totalAmount = items.reduce(
+        (sum, item) => sum + (item.totalAmount || 0),
+        0
+      );
+      
+      const firstOrder = items[0];
+      
+      return {
+        groupId,
+        orders: items,
+        itemsCount: items.length,
+        totalAmount,
+        status: firstOrder?.status || 'pending',
+        customerName: firstOrder?.customerName || 'Unknown Customer',
+        customerPhone: firstOrder?.customerPhone || 'N/A',
+        orderDate: firstOrder?.orderDate || firstOrder?.createdAt || firstOrder?.timestamp,
+        // For navigation purposes
+        firstOrderId: firstOrder?.id || firstOrder?._id,
+        orderGroupId: firstOrder?.orderGroupId || groupId
+      };
+    }).sort(
+      (a, b) => new Date(b.orderDate) - new Date(a.orderDate)
+    ).slice(0, 5); // Show only 5 most recent groups
+    
+    console.log('📦 AdminDashboard: Created', groupedResult.length, 'recent order groups');
+    return groupedResult;
+  };
+  
+  // Handle order press to navigate to specific order in AdminOrders
+  const handleOrderPress = (orderGroup) => {
+    console.log('📱 AdminDashboard: Order group pressed, navigating to AdminOrders with group:', orderGroup);
+    
+    // Navigate to AdminOrders screen and pass the selected order group
+    tabNavigation.navigate('AdminOrders', {
+      selectedOrderId: orderGroup.firstOrderId,
+      selectedOrderGroupId: orderGroup.orderGroupId,
+      highlightOrder: true
+    });
+    
+    // Show a toast to indicate what's happening
+    Toast.show({
+      type: 'info',
+      text1: 'Opening Order Group',
+      text2: `Loading ${orderGroup.itemsCount} order(s) for ${orderGroup.customerName}`,
+      position: 'top',
+      visibilityTime: 2000,
+    });
+  };
+  
   // Calculate dashboard metrics from local orders data
   const calculateDashboardMetrics = async () => {
     try {
@@ -98,9 +209,16 @@ const AdminDashboard = ({ navigation }) => {
       }, 0);
       
       const monthlyRevenue = monthlyOrders.reduce((sum, order) => {
+        // Include all orders in monthly revenue calculation, not just delivered
+        // This provides a more comprehensive view for admin dashboard
         const amount = parseFloat(order.totalAmount || 0);
         return sum + (isNaN(amount) ? 0 : amount);
       }, 0);
+      
+      console.log('📅 AdminDashboard: Monthly revenue calculation details:');
+      console.log('  - Monthly orders found:', monthlyOrders.length);
+      console.log('  - Date range:', monthAgo.toDateString(), 'to', now.toDateString());
+      console.log('  - Monthly revenue total:', monthlyRevenue);
       
       // Count unique customers from orders
       const uniqueCustomerIds = new Set(orders.map(order => order.customerId || order.customerName).filter(Boolean));
@@ -162,6 +280,8 @@ const AdminDashboard = ({ navigation }) => {
   const [userRole, setUserRole] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
   const [autoRefreshInterval, setAutoRefreshInterval] = useState(null);
+  const [notificationCount, setNotificationCount] = useState(0);
+  const [groupedRecentOrders, setGroupedRecentOrders] = useState([]);
 
   const checkAuthentication = async () => {
     console.log('🔍 AdminDashboard: Starting authentication check...');
@@ -297,39 +417,83 @@ const AdminDashboard = ({ navigation }) => {
       // Update recent orders with local data
       setRecentOrders(localData.recentOrders);
       
+      // Group recent orders for display
+      const groupedRecent = groupRecentOrders(localData.recentOrders);
+      setGroupedRecentOrders(groupedRecent);
+      
       // Update last refreshed timestamp
       setLastUpdated(new Date());
       
-      console.log('✅ AdminDashboard: Dashboard updated with local data:');
+      console.log('✅ AdminDashboard: Initial dashboard updated with local data:');
       console.log('  - Total Customers:', localData.metrics.totalCustomers);
       console.log('  - Today Orders:', localData.metrics.todayOrders);
       console.log('  - Total Revenue:', localData.metrics.totalRevenue);
+      console.log('  - Monthly Revenue:', localData.metrics.monthlyRevenue);
       console.log('  - Pending Orders:', localData.metrics.pendingOrders);
       console.log('  - Recent Orders:', localData.recentOrders.length);
+      
+      // Update notification count based on pending orders
+      setNotificationCount(localData.metrics.pendingOrders);
+      
+      // Get enhanced notification stats from adminNotificationService
+      try {
+        const notificationStats = await adminNotificationService.getNotificationStats();
+        console.log('🔔 AdminDashboard: Notification stats:', notificationStats);
+        
+        // Use the more detailed notification count if available
+        if (notificationStats && notificationStats.totalPending !== undefined) {
+          setNotificationCount(notificationStats.totalPending);
+          console.log('✅ AdminDashboard: Updated notification count to:', notificationStats.totalPending);
+        }
+      } catch (notificationError) {
+        console.log('⚠️ AdminDashboard: Failed to get notification stats:', notificationError.message);
+      }
       
       // Try to sync with API to get comprehensive dashboard data
       try {
         console.log('🌐 AdminDashboard: Fetching enhanced dashboard data from API...');
-        const response = await simpleAuthService.makeRequest('/admin/dashboard');
+        const response = await simpleAuthService.makeRequest('/admin/analytics/dashboard-insights');
         
-        if (response && response.success) {
-          console.log('✅ AdminDashboard: Enhanced API data received');
+        console.log('🗺️ AdminDashboard: Raw API response:', response);
+        console.log('🗺️ AdminDashboard: Response type:', typeof response);
+        console.log('🗺️ AdminDashboard: Response keys:', response ? Object.keys(response) : 'null');
+        
+        if (response && (response.success || response.insights)) {
+          console.log('✅ AdminDashboard: Enhanced API data received:', response);
           
-          // Merge API data with local calculations
-          const apiData = response.data;
+          // Extract insights data from response
+          const apiData = response.insights || response.data || response;
+          console.log('📈 AdminDashboard: Mapping API insights fields:', {
+            totalCustomers: apiData.totalCustomers,
+            todayOrders: apiData.todayOrders,
+            totalRevenue: apiData.totalRevenue,
+            monthlyRevenue: apiData.monthlyRevenue,
+            pendingOrders: apiData.pendingOrders,
+            totalOrders: apiData.totalOrders
+          });
+          
           setDashboardData({
             totalCustomers: apiData.totalCustomers || localData.metrics.totalCustomers,
             todayOrders: apiData.todayOrders || localData.metrics.todayOrders,
             totalRevenue: apiData.totalRevenue || localData.metrics.totalRevenue,
             pendingOrders: apiData.pendingOrders || localData.metrics.pendingOrders,
-            weeklyOrders: apiData.totalOrders || localData.metrics.weeklyOrders,
-            monthlyRevenue: apiData.totalRevenue || localData.metrics.monthlyRevenue,
-            activeCustomers: apiData.totalCustomers || localData.metrics.activeCustomers,
+            weeklyOrders: apiData.weeklyOrders || localData.metrics.weeklyOrders,
+            monthlyRevenue: apiData.monthlyRevenue || localData.metrics.monthlyRevenue, // Prefer API monthly revenue
+            activeCustomers: localData.metrics.activeCustomers, // Use local calculation for active customers
             totalOrders: apiData.totalOrders || localData.metrics.totalOrders,
           });
           
+          console.log('✅ AdminDashboard: Final dashboard updated with API + local data:');
+          console.log('  - Total Customers:', apiData.totalCustomers || localData.metrics.totalCustomers, apiData.totalCustomers ? '(API)' : '(Local)');
+          console.log('  - Today Orders:', apiData.todayOrders || localData.metrics.todayOrders, apiData.todayOrders ? '(API)' : '(Local)');
+          console.log('  - Total Revenue:', apiData.totalRevenue || localData.metrics.totalRevenue, apiData.totalRevenue ? '(API)' : '(Local)');
+          console.log('  - Monthly Revenue:', apiData.monthlyRevenue || localData.metrics.monthlyRevenue, apiData.monthlyRevenue ? '(API)' : '(Local)');
+          console.log('  - Pending Orders:', apiData.pendingOrders || localData.metrics.pendingOrders, apiData.pendingOrders ? '(API)' : '(Local)');
+          console.log('  - Weekly Orders:', apiData.weeklyOrders || localData.metrics.weeklyOrders, apiData.weeklyOrders ? '(API)' : '(Local)');
+          
           // Update recent orders with API data if available
           if (apiData.recentOrders && Array.isArray(apiData.recentOrders) && apiData.recentOrders.length > 0) {
+            console.log('📅 AdminDashboard: Processing', apiData.recentOrders.length, 'recent orders from API');
             const formattedApiOrders = (apiData.recentOrders || []).map(order => ({
               id: order._id,
               customerName: order.customer?.name || order.customerName || 'Unknown Customer',
@@ -340,10 +504,27 @@ const AdminDashboard = ({ navigation }) => {
               status: order.status || 'pending',
               timestamp: order.createdAt || order.timestamp
             }));
+            console.log('📅 AdminDashboard: Formatted recent orders:', formattedApiOrders.length);
             setRecentOrders(formattedApiOrders);
+            
+            // Group the API recent orders for display
+            const groupedApiRecent = groupRecentOrders(formattedApiOrders);
+            setGroupedRecentOrders(groupedApiRecent);
+          } else {
+            console.log('📅 AdminDashboard: No recent orders in API response, using local data');
+            setRecentOrders(localData.recentOrders);
+            
+            // Group the local recent orders for display
+            const groupedLocalRecent = groupRecentOrders(localData.recentOrders);
+            setGroupedRecentOrders(groupedLocalRecent);
           }
         } else {
-          console.log('⚠️ AdminDashboard: API returned no data, using local calculations');
+          console.log('⚠️ AdminDashboard: API response failed condition check');
+          console.log('⚠️ Response exists:', !!response);
+          console.log('⚠️ Response.success:', response?.success);
+          console.log('⚠️ Response.insights:', response?.insights);
+          console.log('⚠️ Response.data:', response?.data);
+          console.log('⚠️ AdminDashboard: API returned no valid insights, using local calculations');
         }
       } catch (apiError) {
         console.log('⚠️ AdminDashboard: Enhanced API sync failed, using local data:', apiError.message);
@@ -536,11 +717,24 @@ const AdminDashboard = ({ navigation }) => {
             </View>
             
             <View style={styles.adminHeaderActions}>
-              {formatNumber(dashboardData.pendingOrders) > 0 && (
-                <TouchableOpacity style={styles.notificationButton}>
+              {notificationCount > 0 && (
+                <TouchableOpacity 
+                  style={styles.notificationButton}
+                  onPress={() => {
+                    console.log('🔔 AdminDashboard: Notification bell pressed, navigating to orders');
+                    Toast.show({
+                      type: 'info',
+                      text1: 'Pending Orders',
+                      text2: `${notificationCount} order${notificationCount > 1 ? 's' : ''} need your attention`,
+                      position: 'top',
+                      visibilityTime: 2000,
+                    });
+                    tabNavigation.navigate('AdminOrders');
+                  }}
+                >
                   <Ionicons name="notifications" size={20} color={Colors.white} />
                   <View style={styles.notificationBadge}>
-                    <Text style={styles.notificationBadgeText}>{formatNumber(dashboardData.pendingOrders)}</Text>
+                    <Text style={styles.notificationBadgeText}>{formatNumber(notificationCount)}</Text>
                   </View>
                 </TouchableOpacity>
               )}
@@ -696,35 +890,52 @@ const AdminDashboard = ({ navigation }) => {
         </View>
 
         {/* Recent Orders Section */}
-        {recentOrders && recentOrders.length > 0 && (
+        {groupedRecentOrders && groupedRecentOrders.length > 0 && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Recent Orders</Text>
-            {(recentOrders || []).map((order, index) => (
-              <View key={`${order.id || 'order'}-${index}-${order.timestamp || Date.now()}`} style={styles.orderCard}>
+            {groupedRecentOrders.map((orderGroup, index) => (
+              <TouchableOpacity 
+                key={`${orderGroup.groupId}-${index}`} 
+                style={styles.orderCard}
+                onPress={() => handleOrderPress(orderGroup)}
+                activeOpacity={0.7}
+              >
                 <View style={styles.orderHeader}>
                   <View style={styles.orderInfo}>
-                    <Text style={styles.customerName}>{order.customerName}</Text>
+                    <Text style={styles.customerName}>{orderGroup.customerName}</Text>
+                    <Text style={styles.customerPhone}>
+                      {orderGroup.customerPhone ? `📞 ${orderGroup.customerPhone}` : 'Phone: N/A'}
+                    </Text>
                     <Text style={styles.orderTime}>
-                      {new Date(order.timestamp || order.orderDate || order.createdAt).toLocaleString()}
+                      {new Date(orderGroup.orderDate).toLocaleString()}
                     </Text>
                   </View>
                   <View style={[
                     styles.statusBadge, 
-                    { backgroundColor: order.status === 'pending_verification' ? '#FF9800' : '#f44336' }
+                    { backgroundColor: getStatusColor(orderGroup.status) }
                   ]}>
                     <Text style={styles.statusText}>
-                      {order.status === 'pending_verification' ? 'Pending' : order.status}
+                      {getStatusDisplayText(orderGroup.status)}
                     </Text>
                   </View>
                 </View>
                 <View style={styles.orderDetails}>
-                  <Text style={styles.productName}>{order.productName}</Text>
+                  <Text style={styles.productName}>
+                    {orderGroup.itemsCount} order{orderGroup.itemsCount > 1 ? 's' : ''} 
+                    {orderGroup.orders.length > 1 ? ` • ${orderGroup.orders.length} items` : ''}
+                  </Text>
                   <View style={styles.orderMeta}>
-                    <Text style={styles.quantityText}>{order.quantity}{order.unitType === 'crate' ? ' crates' : 'L'}</Text>
-                    <Text style={styles.amountText}>{formatCurrency(order.totalAmount)}</Text>
+                    <Text style={styles.quantityText}>
+                      Order Group • {orderGroup.itemsCount} item{orderGroup.itemsCount > 1 ? 's' : ''}
+                    </Text>
+                    <Text style={styles.amountText}>{formatCurrency(orderGroup.totalAmount)}</Text>
+                  </View>
+                  <View style={styles.orderActions}>
+                    <Ionicons name="arrow-forward" size={16} color={Colors.primary} />
+                    <Text style={styles.tapToViewText}>Tap to open in Order Management</Text>
                   </View>
                 </View>
-              </View>
+              </TouchableOpacity>
             ))}
             <TouchableOpacity 
               style={styles.viewAllButton}
@@ -735,7 +946,7 @@ const AdminDashboard = ({ navigation }) => {
             </TouchableOpacity>
           </View>
         )}
-      </ScrollView>
+        </ScrollView>
       </SafeAreaView>
     </AuthGuard>
   );
@@ -1263,6 +1474,26 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#54a9f7',
+  },
+  
+  // Additional styles for enhanced orders
+  customerPhone: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 2,
+  },
+  
+  orderActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    gap: 6,
+  },
+  
+  tapToViewText: {
+    fontSize: 12,
+    color: Colors.primary,
+    fontWeight: '500',
   },
 });
 

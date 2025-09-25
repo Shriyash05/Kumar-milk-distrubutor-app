@@ -181,14 +181,20 @@ const PlaceOrderScreen = ({ navigation }) => {
       }
 
       await notificationService.notifyAdminNewOrder({
+        id: orderGroupId,
         orderGroupId,
         createdIds,
         items: cart,
         customer: user,
+        customerName: user.name,
+        totalAmount: totalCartAmount,
       });
       await notificationService.notifyAdminPaymentProof({
+        id: orderGroupId,
         orderGroupId,
         customer: user,
+        customerName: user.name,
+        totalAmount: totalCartAmount,
       });
 
       Toast.show({

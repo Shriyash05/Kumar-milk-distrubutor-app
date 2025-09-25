@@ -51,8 +51,17 @@ export const submitOrders = async ({ cart, user, paymentProof, startDate }) => {
       body: JSON.stringify(multiOrderPayload),
     }, 3);
 
-    await notificationService.notifyAdminNewOrder(multiOrderPayload);
-    await notificationService.notifyAdminPaymentProof(multiOrderPayload);
+    await notificationService.notifyAdminNewOrder({
+      ...multiOrderPayload,
+      id: `MULTI_${Date.now()}`,
+      customerName: user.name,
+      items: preparedCart
+    });
+    await notificationService.notifyAdminPaymentProof({
+      ...multiOrderPayload,
+      id: `MULTI_${Date.now()}`,
+      customerName: user.name
+    });
 
     return { success: true, type: "multi", created: resp };
   } catch (err) {
@@ -74,8 +83,23 @@ export const submitOrders = async ({ cart, user, paymentProof, startDate }) => {
   }
 
   try {
-    await notificationService.notifyAdminNewOrder({ orderGroupId, createdIds: createdOrders, items: preparedCart, customer: user });
-    await notificationService.notifyAdminPaymentProof({ orderGroupId, customer: user });
+    const totalAmount = preparedCart.reduce((sum, item) => sum + Number(item.totalAmount || 0), 0);
+    await notificationService.notifyAdminNewOrder({
+      id: orderGroupId,
+      orderGroupId,
+      createdIds: createdOrders,
+      items: preparedCart,
+      customer: user,
+      customerName: user.name,
+      totalAmount: totalAmount
+    });
+    await notificationService.notifyAdminPaymentProof({
+      id: orderGroupId,
+      orderGroupId,
+      customer: user,
+      customerName: user.name,
+      totalAmount: totalAmount
+    });
   } catch (nErr) {
     console.warn("Admin notification failed:", nErr);
   }

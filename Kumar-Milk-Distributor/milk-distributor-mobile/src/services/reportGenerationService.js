@@ -40,10 +40,19 @@ class ReportGenerationService {
 
       // get report data from service
       const reportDataRaw = await aiAnalyticsService.generateSalesReport(dateRange, filters);
+      
+      console.log('📊 Report data received:', reportDataRaw);
+      
+      if (!reportDataRaw) {
+        throw new Error('Failed to generate report data - no data received from analytics service');
+      }
 
       const aiSummary = includeAISummary ? aiAnalyticsService.generateAISummary(reportDataRaw) : null;
+      
+      // Handle both old and new data structures for rawData access
+      const rawDataForForecast = reportDataRaw.rawData || reportDataRaw.data?.rawData || [];
       const forecast = (aiAnalyticsService.generateForecast && typeof aiAnalyticsService.generateForecast === 'function')
-        ? aiAnalyticsService.generateForecast(reportDataRaw.rawData || [], dateRange)
+        ? aiAnalyticsService.generateForecast(rawDataForForecast, dateRange)
         : null;
 
       const completeReport = {
@@ -263,9 +272,14 @@ class ReportGenerationService {
   // HTML builder
   // -------------------------
   generateHTMLContent(reportData) {
-    const metrics = reportData.metrics || {};
+    console.log('📝 Generating HTML content from reportData:', reportData);
+    
+    // Handle both old and new data structures
+    const metrics = reportData.metrics || reportData.data?.metrics || {};
     const aiSummary = reportData.aiSummary || {};
-    const period = reportData.period || { label: 'Unknown Period' };
+    const period = reportData.period || reportData.data?.period || { label: 'Unknown Period' };
+    
+    console.log('📝 Extracted data for HTML:', { metrics, period });
 
     return `
       <!doctype html>
@@ -320,6 +334,68 @@ class ReportGenerationService {
       `Total Revenue,${metrics.totalRevenue || 0}`,
       `Average Order Value,${(metrics.averageOrderValue||0).toFixed(2)}`
     ].join('\n');
+  }
+
+  // -------------------------
+  // Auto-open report (new functionality)
+  // -------------------------
+  async openReport(reportResult) {
+    try {
+      if (!reportResult || !reportResult.success || !reportResult.filePath) {
+        console.warn('Cannot open report: invalid result object');
+        return { success: false, error: 'Invalid report result' };
+      }
+
+      const { filePath } = reportResult;
+      console.log('📄 Opening report:', filePath);
+
+      // Check if file exists
+      const fileInfo = await FileSystem.getInfoAsync(filePath);
+      if (!fileInfo.exists) {
+        console.error('Report file does not exist:', filePath);
+        return { success: false, error: 'Report file not found' };
+      }
+
+      // Use expo-sharing to open the file with timeout
+      const isAvailable = await Sharing.isAvailableAsync();
+      if (isAvailable) {
+        console.log('🔓 Opening report with system app...');
+        
+        // Add timeout to prevent hanging
+        const openPromise = Sharing.shareAsync(filePath, {
+          dialogTitle: 'Open Report',
+          mimeType: this.getMimeType(reportResult.format),
+        });
+        
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('Open operation timed out')), 10000);
+        });
+        
+        try {
+          await Promise.race([openPromise, timeoutPromise]);
+          console.log('✅ Report opening initiated successfully');
+          return { success: true, message: 'Report opened successfully' };
+        } catch (timeoutError) {
+          console.warn('⚠️ Report opening timed out or was cancelled:', timeoutError.message);
+          return { success: true, message: 'Report opening initiated (may have timed out)' };
+        }
+      } else {
+        return { success: false, error: 'Cannot open reports on this platform' };
+      }
+    } catch (error) {
+      console.error('Error opening report:', error);
+      return { success: false, error: error.message || 'Unknown error' };
+    }
+  }
+
+  getMimeType(format) {
+    const mimeTypes = {
+      'pdf': 'application/pdf',
+      'html': 'text/html',
+      'csv': 'text/csv',
+      'json': 'application/json'
+    };
+    return mimeTypes[format] || 'application/octet-stream';
   }
 
   // -------------------------

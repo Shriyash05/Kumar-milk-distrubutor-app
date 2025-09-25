@@ -1,22 +1,8 @@
 import * as SecureStore from 'expo-secure-store';
-import Constants from 'expo-constants';
-import { Platform } from 'react-native';
+import ApiConfig from '../config/apiConfig';
 
-// Resolve API base URL with sensible mobile defaults
-function resolveBaseUrl() {
-  let base = process.env.EXPO_PUBLIC_API_BASE_URL || Constants.expoConfig?.extra?.apiBaseUrl || 'http://localhost:5000/api';
-  // Normalize trailing slash
-  if (base.endsWith('/')) base = base.replace(/\/$/, '');
-  // Ensure /api suffix
-  if (!base.endsWith('/api')) base = base + '/api';
-  // Android emulator cannot reach localhost; use 10.0.2.2
-  if (Platform.OS === 'android' && base.includes('http://localhost')) {
-    base = base.replace('http://localhost', 'http://10.0.2.2');
-  }
-  return base;
-}
-
-const API_BASE_URL = resolveBaseUrl();
+// Use central API configuration
+const API_BASE_URL = ApiConfig.getURL();
 
 // Log the current API URL for debugging
 console.log('API Base URL:', API_BASE_URL);
@@ -262,7 +248,14 @@ class ApiService {
     });
   }
 
-  // Mobile Orders (for admin)
+  // Universal Admin Orders (includes both web and mobile orders)
+  async getAdminOrders(filters = {}) {
+    const queryParams = new URLSearchParams(filters);
+    const endpoint = queryParams.toString() ? `/admin/orders?${queryParams}` : '/admin/orders';
+    return this.makeRequest(endpoint);
+  }
+
+  // Mobile Orders (for admin) - DEPRECATED, use getAdminOrders instead
   async getMobileOrders(filters = {}) {
     const queryParams = new URLSearchParams(filters);
     const endpoint = queryParams.toString() ? `/admin/mobile-orders?${queryParams}` : '/admin/mobile-orders';

@@ -30,7 +30,7 @@ class ProductionConfig {
 
     // Security Configuration
     this.security = {
-      jwtSecret: process.env.EXPO_PUBLIC_JWT_SECRET || 'kumar-milk-secret-key-2025',
+      jwtSecret: process.env.EXPO_PUBLIC_JWT_SECRET || null, // JWT secret MUST be set via environment variable
       encryptionEnabled: true,
       biometricAuth: true,
       sessionTimeout: 30 * 60 * 1000, // 30 minutes
@@ -218,7 +218,8 @@ class ProductionConfig {
   // Get API base URL based on environment
   getApiBaseUrl() {
     if (this.isProduction) {
-      return process.env.EXPO_PUBLIC_API_PRODUCTION_URL || 'https://api.kumarenterprises.com/api';
+      // Vercel deployment URL - Live Production API
+      return process.env.EXPO_PUBLIC_API_PRODUCTION_URL || 'https://kumar-milk-backend.vercel.app/api';
     } else {
       return process.env.EXPO_PUBLIC_API_BASE_URL || 'http://localhost:5000/api';
     }

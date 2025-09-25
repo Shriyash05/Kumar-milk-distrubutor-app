@@ -3,7 +3,8 @@
  * Provides intelligent sales insights, trend analysis, and natural language summaries
  */
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
+import api from './api';
 
 class AIAnalyticsService {
   constructor() {
@@ -42,36 +43,32 @@ class AIAnalyticsService {
 
   async loadSalesData() {
     try {
-      // Check if user is admin before trying API
-      const userRole = await this.getUserRole();
-      if (userRole === 'admin') {
-        try {
-          console.log('🌐 Admin user - Loading sales data from API...');
-          const response = await this.makeAPIRequest('/admin/analytics/dashboard-insights');
-          if (response.success) {
-            console.log('✅ Loaded analytics data from API');
-            return response.data;
-          }
-        } catch (apiError) {
-          console.log('⚠️ Admin API failed, falling back to local data:', apiError.message);
-        }
-      } else {
-        console.log('📝 Non-admin user - using local data only');
-      }
+      console.log('🌐 Loading sales data from database via API...');
       
-      // Fallback to local data
-      const ordersData = await AsyncStorage.getItem('pendingOrders');
-      this.salesData = ordersData ? JSON.parse(ordersData) : [];
-
-      const customersData = await AsyncStorage.getItem('registeredUsers');
-      this.customers = customersData ? JSON.parse(customersData) : [];
-
-      const productsData = await AsyncStorage.getItem('adminProducts');
-      this.products = productsData ? JSON.parse(productsData) : [];
-
-      console.log(`🤖 Loaded ${this.salesData.length} orders for AI analysis (local)`);
+      // Get dashboard insights which includes order data
+      const response = await api.getDashboardInsights();
+      
+      if (response && response.success) {
+        console.log('✅ Loaded analytics data from database API');
+        
+        // Extract raw orders data from the insights response
+        const rawData = response.insights?.rawData || [];
+        this.salesData = rawData;
+        
+        console.log(`🤖 Loaded ${this.salesData.length} orders for AI analysis (database)`);
+        return response.insights;
+      } else {
+        console.log('⚠️ Failed to load data from API, no data available');
+        this.salesData = [];
+        this.customers = [];
+        this.products = [];
+      }
     } catch (error) {
-      console.error('Error loading sales data:', error);
+      console.error('Error loading sales data from database:', error);
+      // Initialize empty arrays if API fails
+      this.salesData = [];
+      this.customers = [];
+      this.products = [];
     }
   }
 
@@ -81,80 +78,64 @@ class AIAnalyticsService {
 
   async generateSalesReport(dateRange = 'week', customFilters = {}) {
     try {
-      console.log(`📊 Starting sales report generation for ${dateRange}`);
+      console.log(`📊 Starting sales report generation for ${dateRange} from database`);
       
-      // TEMP: Force local processing for debugging
-      console.log('🔧 DEBUG MODE: Skipping API calls for sales report generation');
+      // Use API to get analytics report from database
+      const response = await api.getAnalyticsReport(dateRange, customFilters);
       
-      // Skip API calls entirely for now
-      // const userRole = await this.getUserRole();
-      // if (userRole === 'admin') {
-      //   try {
-      //     console.log('🤖 Admin user - Generating sales report from API...');
-      //     
-      //     // Add timeout protection for API calls
-      //     const apiPromise = this.makeAPIRequest(`/admin/analytics/sales-report?dateRange=${dateRange}&customFilters=${JSON.stringify(customFilters)}`);
-      //     const timeoutPromise = new Promise((_, reject) => 
-      //       setTimeout(() => reject(new Error('API timeout')), 10000)
-      //     );
-      //     
-      //     const response = await Promise.race([apiPromise, timeoutPromise]);
-      //     
-      //     if (response && response.success) {
-      //       console.log('✅ Generated sales report from API');
-      //       return response.data;
-      //     }
-      //   } catch (apiError) {
-      //     console.log('⚠️ Admin API failed, generating report locally:', apiError.message);
-      //   }
-      // } else {
-      //   console.log('📋 Non-admin user - generating report locally only');
-      // }
-      
-      // Fallback to local processing - avoid recursion by using cached data
-      console.log('💾 Using local data for report generation...');
-      if (this.salesData.length === 0) {
-        // Only load fresh data if we don't have any cached
-        const ordersData = await AsyncStorage.getItem('pendingOrders');
-        this.salesData = ordersData ? JSON.parse(ordersData) : [];
-        console.log(`💾 Loaded ${this.salesData.length} orders from local storage`);
+      if (response && response.success) {
+        console.log('✅ Generated sales report from database API');
+        return response.data || response.reportData;
+      } else {
+        console.log('⚠️ Failed to generate report from API, using fallback');
+        
+        // If API fails, try to use cached data if available
+        if (this.salesData && this.salesData.length > 0) {
+          console.log('💾 Using cached data for report generation...');
+          
+          const filteredData = this.filterDataByDateRange(dateRange, customFilters);
+          const metrics = this.calculateSalesMetrics(filteredData);
+          const trends = this.analyzeTrends(filteredData, dateRange);
+          const topProducts = this.getTopProducts(filteredData);
+          const customerAnalysis = this.analyzeCustomerBehavior(filteredData);
+          
+          return {
+            reportId: `report_${Date.now()}`,
+            dateRange: dateRange,
+            period: this.getDateRangePeriod(dateRange),
+            generatedAt: new Date().toISOString(),
+            metrics,
+            trends,
+            topProducts,
+            customerAnalysis,
+            dailySales: this.groupByDay(filteredData),
+            rawData: filteredData
+          };
+        }
+        
+        // Return empty report if no data available
+        return this.createEmptyReport(dateRange);
       }
-
-      const filteredData = this.filterDataByDateRange(dateRange, customFilters);
-      const metrics = this.calculateSalesMetrics(filteredData);
-      const trends = this.analyzeTrends(filteredData, dateRange);
-      const anomalies = this.detectAnomalies(filteredData);
-      const topProducts = this.getTopProducts(filteredData);
-      const customerInsights = this.analyzeCustomerBehavior(filteredData);
-      
-      return {
-        reportId: `report_${Date.now()}`,
-        dateRange: dateRange,
-        period: this.getDateRangePeriod(dateRange),
-        generatedAt: new Date().toISOString(),
-        metrics,
-        trends,
-        anomalies,
-        topProducts,
-        customerInsights,
-        rawData: filteredData
-      };
     } catch (error) {
-      console.error('Error generating sales report:', error);
-      return {
-        reportId: `report_${Date.now()}`,
-        dateRange: dateRange,
-        period: this.getDateRangePeriod(dateRange),
-        generatedAt: new Date().toISOString(),
-        metrics: { totalOrders: 0, totalRevenue: 0, averageOrderValue: 0 },
-        trends: {},
-        anomalies: [],
-        topProducts: { topPerformers: [], worstPerformers: [] },
-        customerInsights: {},
-        rawData: [],
-        error: error.message
-      };
+      console.error('Error generating sales report from database:', error);
+      return this.createEmptyReport(dateRange, error.message);
     }
+  }
+  
+  createEmptyReport(dateRange, errorMessage = null) {
+    return {
+      reportId: `report_${Date.now()}`,
+      dateRange: dateRange,
+      period: this.getDateRangePeriod(dateRange),
+      generatedAt: new Date().toISOString(),
+      metrics: { totalOrders: 0, totalRevenue: 0, averageOrderValue: 0 },
+      trends: {},
+      topProducts: { topPerformers: [], worstPerformers: [] },
+      customerAnalysis: { totalCustomers: 0, repeatCustomers: 0, topCustomers: [] },
+      dailySales: {},
+      rawData: [],
+      error: errorMessage
+    };
   }
 
   filterDataByDateRange(dateRange, customFilters = {}) {
@@ -449,12 +430,17 @@ class AIAnalyticsService {
   }
 
   buildNaturalLanguageSummary(reportData) {
-    // Add null safety checks
+    // Add null safety checks and handle both old and new API response formats
+    console.log('📝 Building summary from reportData:', reportData);
+    
     const metrics = reportData?.metrics || { totalOrders: 0, totalRevenue: 0, averageOrderValue: 0 };
     const trends = reportData?.trends || {};
     const anomalies = reportData?.anomalies || [];
-    const topProducts = reportData?.topProducts || { topPerformers: [], worstPerformers: [] };
+    const topProducts = reportData?.topProducts || (Array.isArray(reportData?.topProducts) ? reportData.topProducts : []);
     const templates = this.models?.nlg?.templates || {};
+    
+    // Convert topProducts array to expected format if needed
+    const topPerformers = Array.isArray(topProducts) ? topProducts : (topProducts?.topPerformers || []);
     
     let summary = [];
     
@@ -484,8 +470,8 @@ class AIAnalyticsService {
     }
     
     // Top products
-    if (topProducts?.topPerformers && topProducts.topPerformers.length > 0) {
-      const topProduct = topProducts.topPerformers[0];
+    if (topPerformers && topPerformers.length > 0) {
+      const topProduct = topPerformers[0];
       if (topProduct && topProduct.name) {
         summary.push(`${topProduct.name} was your best-selling product with ${topProduct.quantity || 0} units sold and ${this.formatCurrency(topProduct.revenue || 0)} in revenue.`);
       }
@@ -519,8 +505,11 @@ class AIAnalyticsService {
     const metrics = reportData?.metrics || {};
     const trends = reportData?.trends || {};
     const anomalies = reportData?.anomalies || [];
-    const topProducts = reportData?.topProducts || {};
-    const customerInsights = reportData?.customerInsights || {};
+    const topProducts = reportData?.topProducts || (Array.isArray(reportData?.topProducts) ? reportData.topProducts : []);
+    const customerInsights = reportData?.customerInsights || reportData?.customerAnalysis || {};
+    
+    // Convert topProducts array to expected format if needed
+    const topPerformers = Array.isArray(topProducts) ? topProducts : (topProducts?.topPerformers || []);
     
     // Revenue insights
     if (metrics.averageOrderValue && metrics.averageOrderValue > 100) {
@@ -532,11 +521,12 @@ class AIAnalyticsService {
     }
     
     // Product insights
-    if (topProducts.concentrationRatio && topProducts.concentrationRatio > 0.8) {
+    if (topPerformers && topPerformers.length > 0) {
+      const topProduct = topPerformers[0];
       insights.push({
-        type: 'warning',
+        type: 'positive',
         category: 'products',
-        text: 'High product concentration risk: Your top 20% of products account for over 80% of sales. Consider diversifying your product mix.'
+        text: `${topProduct?.name || 'Your top product'} is performing well with ${this.formatCurrency(topProduct?.revenue || 0)} in revenue.`
       });
     }
     
@@ -577,7 +567,10 @@ class AIAnalyticsService {
     const metrics = reportData?.metrics || {};
     const trends = reportData?.trends || {};
     const anomalies = reportData?.anomalies || [];
-    const topProducts = reportData?.topProducts || { topPerformers: [] };
+    const topProducts = reportData?.topProducts || (Array.isArray(reportData?.topProducts) ? reportData.topProducts : []);
+    
+    // Convert topProducts array to expected format if needed
+    const topPerformers = Array.isArray(topProducts) ? topProducts : (topProducts?.topPerformers || []);
     
     // Inventory recommendations
     if (topProducts?.topPerformers && Array.isArray(topProducts.topPerformers) && topProducts.topPerformers.length > 0) {
@@ -696,11 +689,110 @@ class AIAnalyticsService {
   }
 
   // ========================
+  // Predefined Query Options & Suggestions
+  // ========================
+
+  getPredefinedQueries() {
+    return {
+      categories: [
+        {
+          title: '📊 Sales Analytics',
+          icon: '💰',
+          color: '#4CAF50',
+          queries: [
+            'What were my sales this week?',
+            'Show me today\'s sales summary',
+            'How much revenue did I make this month?',
+            'Compare this week\'s sales to last week',
+            'What\'s my average order value?',
+            'Show me sales trends for the past month'
+          ]
+        },
+        {
+          title: '🥛 Product Insights',
+          icon: '📈',
+          color: '#2196F3',
+          queries: [
+            'Which are my top selling products?',
+            'Show me product performance this month',
+            'Which products need more inventory?',
+            'What\'s my best performing milk type?',
+            'Show me product sales breakdown',
+            'Which products have the highest profit margin?'
+          ]
+        },
+        {
+          title: '👥 Customer Analytics',
+          icon: '🏆',
+          color: '#FF9800',
+          queries: [
+            'Who are my top customers?',
+            'Show me customer retention rate',
+            'How many new customers this month?',
+            'Which customers order most frequently?',
+            'Show me customer spending patterns',
+            'What\'s my customer lifetime value?'
+          ]
+        },
+        {
+          title: '📋 Order Analytics',
+          icon: '📦',
+          color: '#9C27B0',
+          queries: [
+            'How many orders today?',
+            'Show me pending orders',
+            'What\'s my order fulfillment rate?',
+            'Show me delivery performance',
+            'Which days have the most orders?',
+            'How many cancelled orders this week?'
+          ]
+        },
+        {
+          title: '🔮 Forecasting',
+          icon: '⭐',
+          color: '#607D8B',
+          queries: [
+            'Predict next week\'s sales',
+            'Forecast product demand',
+            'What will be my revenue next month?',
+            'Show me seasonal trends',
+            'Predict customer growth',
+            'Forecast inventory needs'
+          ]
+        }
+      ],
+      quickActions: [
+        { text: 'Sales Today', query: 'Show me today\'s sales summary', icon: '📊', color: '#4CAF50' },
+        { text: 'Top Products', query: 'Which are my top selling products this week?', icon: '🏆', color: '#2196F3' },
+        { text: 'Best Customers', query: 'Who are my top customers this month?', icon: '👥', color: '#FF9800' },
+        { text: 'Orders Status', query: 'How many pending orders do I have?', icon: '📋', color: '#9C27B0' },
+        { text: 'Weekly Summary', query: 'Give me a complete summary of this week\'s business', icon: '📈', color: '#673AB7' },
+        { text: 'Revenue Forecast', query: 'Predict my revenue for next week', icon: '🔮', color: '#607D8B' }
+      ],
+      suggestions: [
+        'What were my sales yesterday?',
+        'Show me the best selling product',
+        'How many orders are pending?',
+        'Who is my top customer?',
+        'What\'s my profit this month?',
+        'Show me delivery statistics'
+      ]
+    };
+  }
+
+  getRandomSuggestions(count = 3) {
+    const queries = this.getPredefinedQueries();
+    const allQueries = queries.categories.flatMap(cat => cat.queries);
+    const shuffled = allQueries.sort(() => 0.5 - Math.random());
+    return shuffled.slice(0, count);
+  }
+
+  // ========================
   // Conversational AI Queries
   // ========================
 
   async processNaturalLanguageQuery(query) {
-    console.log('🔍 Processing AI query:', query);
+    console.log('🔍 Processing AI query via database API:', query);
     
     // Validate input first
     if (!query || typeof query !== 'string' || query.trim().length === 0) {
@@ -712,28 +804,42 @@ class AIAnalyticsService {
     }
     
     try {
-      // Add overall timeout for the entire query processing with shorter timeout
-      const queryPromise = this._processQueryWithTimeout(query.trim());
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Query processing took too long - please try a simpler question')), 8000)
-      );
+      // First try to process the query via the server's database API
+      console.log('🌐 Attempting to process query via server API...');
+      const response = await api.processAIQuery(query.trim());
       
-      const result = await Promise.race([queryPromise, timeoutPromise]);
-      
-      // Validate the result structure
-      if (!result || typeof result !== 'object') {
-        throw new Error('Invalid AI response structure');
+      if (response && response.success) {
+        console.log('✅ AI query processed successfully via database API');
+        console.log('📊 Response from API:', JSON.stringify(response, null, 2));
+        return {
+          type: 'answer',
+          text: response.answer || response.result || 'I processed your query but couldn\'t generate a response.',
+          data: response.data || response.responseData || {},
+          intent: response.intent,
+          confidence: response.confidence
+        };
+      } else {
+        console.log('⚠️ API query processing failed, using local fallback');
+        console.log('📊 Failed API response:', JSON.stringify(response, null, 2));
+        // Fallback to local processing
+        return await this._processQueryWithTimeout(query.trim());
       }
-      
-      return result;
     } catch (error) {
-      console.error('Error processing natural language query:', error);
+      console.error('Error processing query via API:', error);
       
-      // Return a safe, user-friendly error response
-      return {
-        type: 'error',
-        text: `I'm having trouble processing your question right now. Please try asking something simpler like:\n\n• "What were my sales this week?"\n• "Show me top products"\n• "How many orders today?"`
-      };
+      // Try local fallback on API failure
+      try {
+        console.log('🔄 Attempting local query processing as fallback...');
+        return await this._processQueryWithTimeout(query.trim());
+      } catch (localError) {
+        console.error('Local query processing also failed:', localError);
+        
+        // Return a safe, user-friendly error response
+        return {
+          type: 'error',
+          text: `I'm having trouble processing your question right now. Please try asking something simpler like:\n\n• "What were my sales this week?"\n• "Show me top products"\n• "How many orders today?"`
+        };
+      }
     }
   }
   
@@ -832,7 +938,7 @@ class AIAnalyticsService {
       }
     }
     
-    console.log(`❌ No pattern matched for query: ${query}`);
+    console.log(`⌛ No pattern matched for query: ${query}`);
     return { type: 'unknown', confidence: 0.1, extractedParams: {} };
   }
 
@@ -932,6 +1038,192 @@ class AIAnalyticsService {
       return {
         type: 'error',
         text: 'I encountered an error while fetching sales data. Please try again later.',
+        data: {}
+      };
+    }
+  }
+
+  async handleCustomerQuery(intent) {
+    try {
+      console.log('👥 Processing customer insights query...');
+      const reportData = await this.generateSalesReport('month');
+      
+      if (!reportData || !reportData.customerAnalysis) {
+        return {
+          type: 'answer',
+          text: 'No customer data available for analysis. Please ensure you have customer information in your orders.',
+          data: {}
+        };
+      }
+      
+      const customerData = reportData.customerAnalysis;
+      const response = `Customer Insights:\n\n` +
+        `👥 Total Customers: ${customerData.totalCustomers || 0}\n` +
+        `🔄 Repeat Customers: ${customerData.repeatCustomers || 0} (${Math.round((customerData.repeatCustomerRate || 0) * 100)}% retention)\n` +
+        `📊 Average Orders per Customer: ${Math.round(customerData.avgOrdersPerCustomer || 0)}\n\n` +
+        `Top Customers:\n` +
+        (customerData.topCustomers || []).slice(0, 3).map((customer, index) => 
+          `${index + 1}. ${customer.name || 'Unknown'}: ${customer.orders || 0} orders, ${this.formatCurrency(customer.revenue || 0)}`
+        ).join('\n');
+      
+      return {
+        type: 'answer',
+        text: response,
+        data: customerData
+      };
+    } catch (error) {
+      console.error('Error in handleCustomerQuery:', error);
+      return {
+        type: 'error',
+        text: 'I encountered an error while analyzing customer data. Please try again later.',
+        data: {}
+      };
+    }
+  }
+
+  async handleRevenueQuery(intent) {
+    try {
+      console.log('💰 Processing revenue analysis query...');
+      const period = intent.extractedParams?.period || 'month';
+      const reportData = await this.generateSalesReport(period);
+      
+      if (!reportData || !reportData.metrics) {
+        return {
+          type: 'answer',
+          text: `No revenue data available for the ${period} period.`,
+          data: {}
+        };
+      }
+      
+      const metrics = reportData.metrics;
+      const dailySales = reportData.dailySales || {};
+      const days = Object.keys(dailySales).sort();
+      
+      // Calculate trend
+      let trendText = '';
+      if (days.length > 1) {
+        const revenueValues = days.map(day => dailySales[day]?.revenue || 0);
+        const trend = this.calculateTrendDirection(revenueValues);
+        const trendEmoji = trend === 'increasing' ? '📈' : trend === 'decreasing' ? '📉' : '➡️';
+        trendText = `\n${trendEmoji} Revenue Trend: ${trend}`;
+      }
+      
+      const response = `Revenue Analysis for ${this.getPeriodText(period)}:\n\n` +
+        `💰 Total Revenue: ${this.formatCurrency(metrics.totalRevenue || 0)}\n` +
+        `📈 Average Order Value: ${this.formatCurrency(metrics.averageOrderValue || 0)}\n` +
+        `📊 Orders: ${metrics.totalOrders || 0}\n` +
+        `💳 Revenue per Order: ${this.formatCurrency((metrics.totalRevenue || 0) / (metrics.totalOrders || 1))}` +
+        trendText;
+      
+      return {
+        type: 'answer',
+        text: response,
+        data: { ...metrics, trend: days.length > 1 ? this.calculateTrendDirection(days.map(day => dailySales[day]?.revenue || 0)) : 'stable' }
+      };
+    } catch (error) {
+      console.error('Error in handleRevenueQuery:', error);
+      return {
+        type: 'error',
+        text: 'I encountered an error while analyzing revenue data. Please try again later.',
+        data: {}
+      };
+    }
+  }
+
+  async handleForecastQuery(intent) {
+    try {
+      console.log('🔮 Processing forecast query...');
+      const period = intent.extractedParams?.period || 'week';
+      const reportData = await this.generateSalesReport('month'); // Use longer period for better forecasting
+      
+      if (!reportData || !reportData.dailySales || Object.keys(reportData.dailySales).length < 7) {
+        return {
+          type: 'answer',
+          text: 'I need at least a week of sales data to generate reliable forecasts. Please check back when you have more historical data.',
+          data: {}
+        };
+      }
+      
+      const dailySales = reportData.dailySales;
+      const days = Object.keys(dailySales).sort();
+      const revenueValues = days.map(day => dailySales[day]?.revenue || 0);
+      const orderValues = days.map(day => dailySales[day]?.orders || 0);
+      
+      // Simple trend-based forecast
+      const revenueRegression = this.calculateLinearRegression(revenueValues);
+      const orderRegression = this.calculateLinearRegression(orderValues);
+      
+      // Forecast next period
+      const nextPeriodRevenue = Math.max(0, revenueRegression.slope * revenueValues.length + revenueRegression.intercept);
+      const nextPeriodOrders = Math.max(0, Math.round(orderRegression.slope * orderValues.length + orderRegression.intercept));
+      
+      const confidence = revenueRegression.rSquared > 0.7 ? 'High' : revenueRegression.rSquared > 0.4 ? 'Medium' : 'Low';
+      
+      const response = `Sales Forecast:\n\n` +
+        `🔮 Predicted ${period} Revenue: ${this.formatCurrency(nextPeriodRevenue)}\n` +
+        `📊 Predicted Orders: ${nextPeriodOrders}\n` +
+        `🎯 Confidence Level: ${confidence}\n\n` +
+        `Based on ${days.length} days of historical data.` +
+        (confidence === 'Low' ? '\n\n⚠️ More data needed for accurate predictions.' : '');
+      
+      return {
+        type: 'answer',
+        text: response,
+        data: {
+          forecastRevenue: nextPeriodRevenue,
+          forecastOrders: nextPeriodOrders,
+          confidence: confidence.toLowerCase(),
+          rSquared: revenueRegression.rSquared,
+          dataPoints: days.length
+        }
+      };
+    } catch (error) {
+      console.error('Error in handleForecastQuery:', error);
+      return {
+        type: 'error',
+        text: 'I encountered an error while generating forecasts. Please try again later.',
+        data: {}
+      };
+    }
+  }
+
+  // Generic query handler for unclassified queries
+  handleGenericQuery(query) {
+    try {
+      console.log('🤖 Handling generic query:', query);
+      
+      // Get predefined queries for better suggestions
+      const predefinedQueries = this.getPredefinedQueries();
+      const randomSuggestions = this.getRandomSuggestions(5);
+      
+      // Create contextual response based on common keywords
+      let contextualHelp = '';
+      const queryLower = query.toLowerCase();
+      
+      if (queryLower.includes('help') || queryLower.includes('what can you do')) {
+        contextualHelp = 'I can help you analyze your business data in many ways:\n\n• Sales Analytics: Revenue, trends, growth\n• Product Insights: Best sellers, inventory\n• Customer Analytics: Top customers, retention\n• Order Management: Status, fulfillment\n• Forecasting: Predict future sales\n\n';
+      } else if (queryLower.includes('example') || queryLower.includes('sample')) {
+        contextualHelp = 'Here are some example questions you can ask:\n\n';
+      } else {
+        contextualHelp = `I understand you're asking about "${query}", but I need more specific information.\n\n`;
+      }
+      
+      const response = contextualHelp + `Try these specific questions:\n\n${randomSuggestions.map(s => `• ${s}`).join('\n')}\n\nYou can also browse categories in the welcome screen by clearing the chat!`;
+      
+      return {
+        type: 'answer',
+        text: response,
+        data: {
+          suggestedQueries: randomSuggestions,
+          originalQuery: query,
+          categories: predefinedQueries.categories.map(cat => cat.title)
+        }
+      };
+    } catch (error) {
+      console.error('Error in handleGenericQuery:', error);
+      return {
+        type: 'error',
+        text: 'I\'m having trouble understanding your question. Please try asking something simpler like "show sales" or "top products".',
         data: {}
       };
     }
@@ -1478,25 +1770,6 @@ class AIAnalyticsService {
     return Math.min(regression.rSquared, 1);
   }
 
-  calculateSummaryConfidence(reportData) {
-    const factors = [];
-    
-    // Data completeness
-    if (reportData.metrics.totalOrders > 10) factors.push(0.3);
-    else if (reportData.metrics.totalOrders > 5) factors.push(0.2);
-    else factors.push(0.1);
-    
-    // Trend confidence
-    if (reportData.trends.salesTrend.confidence) {
-      factors.push(reportData.trends.salesTrend.confidence * 0.4);
-    }
-    
-    // Data recency (assuming recent data is more reliable)
-    factors.push(0.3);
-    
-    return Math.min(factors.reduce((sum, factor) => sum + factor, 0), 1);
-  }
-
   calculateForecastConfidence(data) {
     if (data.length < 7) return 'low';
     if (data.length < 30) return 'medium';
@@ -1530,198 +1803,133 @@ class AIAnalyticsService {
     
     const forecasts = {};
     Object.entries(productDemand).forEach(([productId, data]) => {
-      const avgDemand = data.quantities.reduce((sum, q) => sum + q, 0) / data.quantities.length;
-      const forecastDays = period === 'week' ? 7 : period === 'month' ? 30 : 1;
+      const quantities = data.quantities;
+      if (quantities.length < 3) {
+        forecasts[productId] = {
+          name: data.name,
+          forecast: 0,
+          confidence: 'low',
+          note: 'Insufficient historical data'
+        };
+        return;
+      }
+      
+      // Simple average-based forecast
+      const avg = quantities.reduce((a, b) => a + b, 0) / quantities.length;
+      const variance = quantities.reduce((a, b) => a + Math.pow(b - avg, 2), 0) / quantities.length;
+      const stdDev = Math.sqrt(variance);
       
       forecasts[productId] = {
         name: data.name,
-        estimatedDemand: Math.ceil(avgDemand * forecastDays),
-        confidence: data.quantities.length > 10 ? 'high' : data.quantities.length > 5 ? 'medium' : 'low'
+        forecast: avg,
+        range: { low: Math.max(0, avg - stdDev), high: avg + stdDev },
+        confidence: stdDev / avg < 0.3 ? 'high' : stdDev / avg < 0.6 ? 'medium' : 'low'
       };
     });
     
     return forecasts;
   }
 
-  async handleCustomerQuery(intent) {
-    try {
-      const period = intent.extractedParams?.period || 'month';
-      const reportData = await this.generateSalesReport(period);
-      
-      // Add null safety checks
-      const customerInsights = reportData?.customerInsights || {};
-      
-      if (!customerInsights || Object.keys(customerInsights).length === 0) {
-        return {
-          type: 'answer',
-          text: `No customer data available for the ${period} period.`,
-          data: {}
-        };
-      }
-      
-      const response = `Customer insights for the ${period}:\n\n` +
-        `👥 Total Customers: ${customerInsights.totalCustomers || 0}\n` +
-        `🔄 Repeat Customers: ${customerInsights.repeatCustomers || 0}\n` +
-        `📊 Retention Rate: ${((customerInsights.repeatCustomerRate || 0) * 100).toFixed(1)}%\n` +
-        `💰 Avg Customer Value: ${this.formatCurrency((customerInsights.avgLifetimeValue || 0))}`;
-      
-      return {
-        type: 'answer',
-        text: response,
-        data: customerInsights
-      };
-    } catch (error) {
-      console.error('Error in handleCustomerQuery:', error);
-      return {
-        type: 'error',
-        text: 'I encountered an error while fetching customer data. Please try again later.',
-        data: {}
-      };
-    }
-  }
+  // ========================
+  // Placeholder API + User role (mocked for now)
+  // ========================
 
-  async handleRevenueQuery(intent) {
-    try {
-      console.log('💰 Handling revenue query...');
-      const period = intent.extractedParams?.period || 'month';
-      
-      // Add timeout protection for report generation
-      const reportPromise = this.generateSalesReport(period);
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Report generation timeout')), 10000)
-      );
-      
-      const reportData = await Promise.race([reportPromise, timeoutPromise]);
-      
-      console.log('📋 Report data received, processing metrics...');
-      
-      // Add null safety checks
-      const metrics = reportData?.metrics || { totalRevenue: 0, totalOrders: 0, averageOrderValue: 0 };
-      
-      console.log('📈 Metrics extracted:', {
-        totalRevenue: metrics.totalRevenue,
-        totalOrders: metrics.totalOrders,
-        averageOrderValue: metrics.averageOrderValue
-      });
-      
-      const response = `Revenue analysis for the ${period}:\n\n` +
-        `💰 Total Revenue: ${this.formatCurrency(metrics.totalRevenue || 0)}\n` +
-        `📊 From ${metrics.totalOrders || 0} orders\n` +
-        `📈 Average Order Value: ${this.formatCurrency(metrics.averageOrderValue || 0)}\n` +
-        `🏆 Peak Day Revenue: ${metrics.peakDay ? this.formatCurrency(metrics.peakDay.revenue || 0) : 'N/A'}`;
-      
-      console.log('✅ Revenue response generated successfully');
-      
-      return {
-        type: 'answer',
-        text: response,
-        data: { revenue: metrics.totalRevenue || 0, breakdown: reportData || {} }
-      };
-    } catch (error) {
-      console.error('Error in handleRevenueQuery:', error);
-      return {
-        type: 'error',
-        text: 'I encountered an error while fetching revenue data. Please try again later.',
-        data: {}
-      };
-    }
-  }
-
-  async handleForecastQuery(intent) {
-    try {
-      const period = intent.extractedParams?.period || 'week';
-      const reportData = await this.generateSalesReport('month'); // Use month of data for forecasting
-      
-      if (!reportData || !reportData.rawData) {
-        return {
-          type: 'answer',
-          text: 'Insufficient data available for forecasting. Please ensure you have at least a month of sales data.',
-          data: {}
-        };
-      }
-      
-      const forecast = this.generateForecast(reportData.rawData, period);
-      const salesForecast = forecast?.predictions?.sales;
-      
-      if (!salesForecast) {
-        return {
-          type: 'answer',
-          text: 'Unable to generate forecast with current data. Please check back when you have more sales history.',
-          data: {}
-        };
-      }
-      
-      const response = `Sales forecast for the next ${period}:\n\n` +
-        `📈 Predicted Sales: ${this.formatCurrency(salesForecast.value || 0)}\n` +
-        `📊 Range: ${this.formatCurrency((salesForecast.range?.low || 0))} - ${this.formatCurrency((salesForecast.range?.high || 0))}\n` +
-        `🎯 Confidence: ${salesForecast.confidence || 'low'}\n` +
-        `📋 Based on: ${forecast.methodology || 'statistical analysis'}`;
-      
-      return {
-        type: 'answer',
-        text: response,
-        data: forecast
-      };
-    } catch (error) {
-      console.error('Error in handleForecastQuery:', error);
-      return {
-        type: 'error',
-        text: 'I encountered an error while generating forecast data. Please try again later.',
-        data: {}
-      };
-    }
-  }
-
-  handleGenericQuery(query) {
-    return {
-      type: 'answer',
-      text: `I understand you're asking about "${query}", but I need more specific information to help you. Try asking about:
-      
-• "What were my top products this month?"
-• "Show me sales for last week"
-• "Which customers ordered the most?"
-• "What's my revenue forecast for next week?"
-• "How did yesterday's sales perform?"`,
-      suggestions: [
-        "Top products this month",
-        "Sales for last week", 
-        "Revenue forecast",
-        "Customer insights",
-        "Yesterday's performance"
-      ]
-    };
-  }
-  
-  // Debug method for testing query classification
-  debugQueryClassification(query) {
-    console.log('🔍 Debug: Testing query classification for:', query);
-    const result = this.classifyQueryIntent(query);
-    console.log('🔍 Debug: Classification result:', result);
-    return result;
-  }
-  
-  // Helper Methods
   async getUserRole() {
     try {
-      const SecureStore = await import('expo-secure-store');
-      return await SecureStore.getItemAsync('userRole');
-    } catch (error) {
-      console.log('Error getting user role:', error);
-      return null;
+      const role = await SecureStore.getItemAsync('userRole');
+      return role || 'user';
+    } catch {
+      return 'user';
     }
   }
   
-  // API Helper Method
-  async makeAPIRequest(endpoint, options = {}) {
+  // Generate quick insights for dashboard
+  async generateQuickInsights() {
     try {
-      // Dynamic import to avoid circular dependency
-      const simpleAuthService = await import('./simpleAuthService');
-      return await simpleAuthService.default.makeRequest(endpoint, options);
+      console.log('📊 Generating quick insights from database...');
+      
+      // Get dashboard insights from API
+      const response = await api.getDashboardInsights();
+      
+      if (response && response.success) {
+        console.log('✅ Generated quick insights from database API');
+        
+        const insights = response.insights;
+        
+        return [
+          {
+            title: 'Total Revenue',
+            value: `₹${(insights.summary?.totalRevenue || 0).toLocaleString()}`,
+            trend: insights.trends?.revenue || 'stable',
+            icon: '💰',
+            color: '#4CAF50'
+          },
+          {
+            title: 'Total Orders',
+            value: (insights.summary?.totalOrders || 0).toString(),
+            trend: insights.trends?.orders || 'stable',
+            icon: '📎',
+            color: '#2196F3'
+          },
+          {
+            title: 'Avg Order Value',
+            value: `₹${(insights.summary?.averageOrderValue || 0).toFixed(0)}`,
+            trend: 'stable',
+            icon: '📈',
+            color: '#FF9800'
+          },
+          {
+            title: 'Top Product',
+            value: insights.summary?.topProduct || 'No data',
+            trend: 'neutral',
+            icon: '🥛',
+            color: '#9C27B0'
+          }
+        ];
+      } else {
+        console.log('⚠️ Failed to get insights from API');
+        return this.getDefaultInsights();
+      }
     } catch (error) {
-      console.error('API request failed:', error.message);
-      throw error;
+      console.error('Error generating quick insights:', error);
+      return this.getDefaultInsights();
     }
+  }
+  
+  getDefaultInsights() {
+    return [
+      {
+        title: 'Total Revenue',
+        value: '₹0',
+        trend: 'stable',
+        icon: '💰',
+        color: '#4CAF50'
+      },
+      {
+        title: 'Total Orders',
+        value: '0',
+        trend: 'stable',
+        icon: '📎',
+        color: '#2196F3'
+      },
+      {
+        title: 'Avg Order Value',
+        value: '₹0',
+        trend: 'stable',
+        icon: '📈',
+        color: '#FF9800'
+      },
+      {
+        title: 'Top Product',
+        value: 'No data',
+        trend: 'neutral',
+        icon: '🥛',
+        color: '#9C27B0'
+      }
+    ];
   }
 }
 
-export default new AIAnalyticsService();
+// Create and export an instance instead of the class
+const aiAnalyticsService = new AIAnalyticsService();
+export default aiAnalyticsService;

@@ -41,10 +41,7 @@
     ],
     "scheme": "kumar-milk-distributor",
     "extra": {
-      "eas": {
-        "projectId": "your-project-id-here"
-      },
-      "apiBaseUrl": "https://kumar-milk-distributors.onrender.com/api",
+      "apiBaseUrl": "https://api-kumarmilk.vercel.app/api",
       "enableDemoMode": false,
       "ENV": "production"
     }

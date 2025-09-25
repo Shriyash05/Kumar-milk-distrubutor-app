@@ -12,6 +12,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   StatusBar,
+  AppState,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -46,6 +47,24 @@ const AIReportsScreenNew = ({ navigation }) => {
   // Load initial data
   useEffect(() => {
     loadInitialData();
+  }, []);
+
+  // Handle app state changes (when returning from PDF viewer)
+  useEffect(() => {
+    const handleAppStateChange = (nextAppState) => {
+      console.log('📱 App state changed to:', nextAppState);
+      if (nextAppState === 'active') {
+        // User returned to app (possibly from PDF viewer)
+        console.log('🔄 App became active, ensuring loading state is reset');
+        setLoading(false); // Ensure loading spinner is stopped
+      }
+    };
+
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+
+    return () => {
+      subscription?.remove();
+    };
   }, []);
 
   const loadInitialData = async () => {
@@ -110,15 +129,53 @@ const AIReportsScreenNew = ({ navigation }) => {
   const generateReport = async () => {
     try {
       setLoading(true);
+      console.log('📝 Starting report generation...');
+      
       const result = await reportGenerationService.generateReport(reportConfig);
+      console.log('📝 Report generation result:', result);
       
       if (result.success) {
+        // First show success toast
         Toast.show({
           type: 'success',
           text1: 'Report Generated',
           text2: `${reportConfig.format.toUpperCase()} report created successfully`,
         });
+        
+        // Update saved reports list
         await loadSavedReports();
+        
+        // Set loading to false BEFORE attempting to open report
+        setLoading(false);
+        
+        // Auto-open the report after a small delay (non-blocking)
+        setTimeout(async () => {
+          try {
+            console.log('📝 Attempting to auto-open report...');
+            const openResult = await reportGenerationService.openReport(result);
+            if (openResult.success) {
+              console.log('✅ Report opened automatically');
+            } else {
+              console.log('⚠️ Failed to auto-open report:', openResult.error);
+              // Show additional toast about manual access
+              Toast.show({
+                type: 'info',
+                text1: 'Report Saved',
+                text2: 'Tap on the report below to open it',
+                visibilityTime: 4000,
+              });
+            }
+          } catch (openError) {
+            console.error('Error auto-opening report:', openError);
+          }
+        }, 500); // Small delay to ensure UI updates first
+        
+      } else {
+        Toast.show({
+          type: 'error',
+          text1: 'Generation Failed',
+          text2: result.error || 'Failed to generate report',
+        });
       }
     } catch (error) {
       console.error('Report generation error:', error);
@@ -128,25 +185,40 @@ const AIReportsScreenNew = ({ navigation }) => {
         text2: 'Failed to generate report',
       });
     } finally {
+      // Ensure loading is always set to false
       setLoading(false);
+      console.log('📝 Report generation process completed');
     }
   };
 
-  // Share report
+  // Open/Share report
   const shareReport = async (report) => {
     try {
-      await reportGenerationService.shareReport(report);
-      Toast.show({
-        type: 'success',
-        text1: 'Report Shared',
-        text2: 'Report shared successfully',
+      // First try to open the report directly
+      const openResult = await reportGenerationService.openReport({
+        success: true,
+        filePath: report.filePath,
+        format: report.fileName.split('.').pop() // Extract format from filename
       });
+      
+      if (openResult.success) {
+        console.log('✅ Report opened successfully');
+      } else {
+        // If opening fails, fall back to sharing
+        console.log('🔄 Opening failed, trying to share:', openResult.error);
+        await reportGenerationService.shareReport(report);
+        Toast.show({
+          type: 'success',
+          text1: 'Report Shared',
+          text2: 'Report shared successfully',
+        });
+      }
     } catch (error) {
-      console.error('Share error:', error);
+      console.error('Report access error:', error);
       Toast.show({
         type: 'error',
-        text1: 'Share Failed',
-        text2: 'Failed to share report',
+        text1: 'Access Failed',
+        text2: 'Failed to open report',
       });
     }
   };
@@ -200,6 +272,86 @@ const AIReportsScreenNew = ({ navigation }) => {
     setTimeout(() => {
       sendChatMessage();
     }, 100);
+  };
+
+  // Render welcome message with predefined options
+  const renderWelcomeMessage = () => {
+    const predefinedQueries = aiAnalyticsService.getPredefinedQueries();
+    
+    return (
+      <View style={styles.welcomeMessage}>
+        <Text style={styles.welcomeText}>
+          👋 Hi! I'm your AI business assistant. Ask me anything about your sales data!
+        </Text>
+        
+        {/* Quick Action Buttons */}
+        <Text style={styles.sectionHeader}>Quick Actions</Text>
+        <View style={styles.quickActionsGrid}>
+          {predefinedQueries.quickActions.map((action, index) => (
+            <TouchableOpacity
+              key={index}
+              style={[styles.quickActionButton, { backgroundColor: action.color + '15', borderColor: action.color }]}
+              onPress={() => sendQuickQuery(action.query)}
+            >
+              <Text style={styles.quickActionIcon}>{action.icon}</Text>
+              <Text style={[styles.quickActionText, { color: action.color }]}>{action.text}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        
+        {/* Query Categories */}
+        <Text style={styles.sectionHeader}>Browse by Category</Text>
+        {predefinedQueries.categories.map((category, categoryIndex) => (
+          <View key={categoryIndex} style={styles.queryCategory}>
+            <TouchableOpacity
+              style={styles.categoryHeader}
+              onPress={() => {
+                // Toggle category expansion (we'll implement this state if needed)
+                // For now, just show first 2 queries
+              }}
+            >
+              <Text style={styles.categoryIcon}>{category.icon}</Text>
+              <Text style={styles.categoryTitle}>{category.title}</Text>
+              <Text style={[styles.categoryBadge, { backgroundColor: category.color }]}>
+                {category.queries.length}
+              </Text>
+            </TouchableOpacity>
+            
+            <View style={styles.categoryQueries}>
+              {category.queries.slice(0, 2).map((query, queryIndex) => (
+                <TouchableOpacity
+                  key={queryIndex}
+                  style={styles.categoryQueryButton}
+                  onPress={() => sendQuickQuery(query)}
+                >
+                  <Text style={styles.categoryQueryText}>{query}</Text>
+                  <Ionicons name="arrow-forward" size={14} color="#54a9f7" />
+                </TouchableOpacity>
+              ))}
+              {category.queries.length > 2 && (
+                <Text style={styles.moreQueriesText}>
+                  +{category.queries.length - 2} more questions...
+                </Text>
+              )}
+            </View>
+          </View>
+        ))}
+        
+        {/* Random Suggestions */}
+        <Text style={styles.sectionHeader}>Try asking:</Text>
+        <View style={styles.suggestionButtons}>
+          {aiAnalyticsService.getRandomSuggestions(3).map((suggestion, index) => (
+            <TouchableOpacity
+              key={index}
+              style={styles.suggestionButton}
+              onPress={() => sendQuickQuery(suggestion)}
+            >
+              <Text style={styles.suggestionText}>{suggestion}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </View>
+    );
   };
 
   // Open chat
@@ -385,30 +537,7 @@ const AIReportsScreenNew = ({ navigation }) => {
             ref={chatScrollRef}
             showsVerticalScrollIndicator={false}
           >
-            {chatHistory.length === 0 && (
-              <View style={styles.welcomeMessage}>
-                <Text style={styles.welcomeText}>
-                  👋 Hi! I'm your AI business assistant. Ask me anything about your sales data!
-                </Text>
-                
-                <View style={styles.suggestionButtons}>
-                  {[
-                    'What were my top products this month?',
-                    'Show me sales for last week',
-                    'How is my revenue trending?',
-                    'Which customers order the most?'
-                  ].map((suggestion, index) => (
-                    <TouchableOpacity
-                      key={index}
-                      style={styles.suggestionButton}
-                      onPress={() => sendQuickQuery(suggestion)}
-                    >
-                      <Text style={styles.suggestionText}>{suggestion}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-            )}
+            {chatHistory.length === 0 && renderWelcomeMessage()}
 
             {chatHistory.map((message, index) => (
               <View
@@ -437,6 +566,34 @@ const AIReportsScreenNew = ({ navigation }) => {
               </View>
             )}
           </ScrollView>
+
+          {/* Quick shortcuts bar when there are messages */}
+          {chatHistory.length > 0 && (
+            <View style={styles.quickShortcutsBar}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.shortcutsScroll}>
+                {aiAnalyticsService.getPredefinedQueries().quickActions.slice(0, 4).map((action, index) => (
+                  <TouchableOpacity
+                    key={index}
+                    style={[styles.shortcutButton, { borderColor: action.color }]}
+                    onPress={() => sendQuickQuery(action.query)}
+                  >
+                    <Text style={styles.shortcutIcon}>{action.icon}</Text>
+                    <Text style={styles.shortcutText}>{action.text}</Text>
+                  </TouchableOpacity>
+                ))}
+                <TouchableOpacity 
+                  style={styles.moreShortcutsButton}
+                  onPress={() => {
+                    // Clear chat to show welcome screen again
+                    setChatHistory([]);
+                  }}
+                >
+                  <Ionicons name="add" size={16} color="#54a9f7" />
+                  <Text style={styles.moreShortcutsText}>More</Text>
+                </TouchableOpacity>
+              </ScrollView>
+            </View>
+          )}
 
           <View style={styles.chatInputContainer}>
             <TextInput
@@ -752,14 +909,112 @@ const styles = StyleSheet.create({
   },
   welcomeMessage: {
     padding: 20,
-    alignItems: 'center',
   },
   welcomeText: {
     fontSize: 16,
     textAlign: 'center',
     color: '#666',
+    marginBottom: 24,
+  },
+  sectionHeader: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#2c3e50',
+    marginTop: 20,
+    marginBottom: 12,
+  },
+  
+  // Quick Actions Grid
+  quickActionsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
     marginBottom: 20,
   },
+  quickActionButton: {
+    flex: 1,
+    minWidth: '45%',
+    maxWidth: '48%',
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    minHeight: 80,
+  },
+  quickActionIcon: {
+    fontSize: 24,
+    marginBottom: 6,
+  },
+  quickActionText: {
+    fontSize: 12,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  
+  // Query Categories
+  queryCategory: {
+    backgroundColor: '#f8f9fa',
+    borderRadius: 12,
+    marginBottom: 16,
+    overflow: 'hidden',
+  },
+  categoryHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e9ecef',
+  },
+  categoryIcon: {
+    fontSize: 20,
+    marginRight: 10,
+  },
+  categoryTitle: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#2c3e50',
+  },
+  categoryBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    minWidth: 24,
+  },
+  categoryQueries: {
+    padding: 16,
+    paddingTop: 8,
+  },
+  categoryQueryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#fff',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#e9ecef',
+  },
+  categoryQueryText: {
+    flex: 1,
+    fontSize: 14,
+    color: '#495057',
+    marginRight: 8,
+  },
+  moreQueriesText: {
+    fontSize: 12,
+    color: '#6c757d',
+    fontStyle: 'italic',
+    textAlign: 'center',
+    marginTop: 8,
+  },
+  
+  // Random Suggestions
   suggestionButtons: {
     gap: 8,
     width: '100%',
@@ -807,6 +1062,54 @@ const styles = StyleSheet.create({
     marginTop: 4,
     opacity: 0.7,
   },
+  
+  // Quick Shortcuts Bar
+  quickShortcutsBar: {
+    backgroundColor: '#f8f9fa',
+    borderTopWidth: 1,
+    borderTopColor: '#e9ecef',
+    paddingVertical: 8,
+  },
+  shortcutsScroll: {
+    paddingHorizontal: 12,
+  },
+  shortcutButton: {
+    marginRight: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    minWidth: 70,
+  },
+  shortcutIcon: {
+    fontSize: 14,
+    marginBottom: 2,
+  },
+  shortcutText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#495057',
+  },
+  moreShortcutsButton: {
+    marginRight: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#54a9f7',
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 4,
+  },
+  moreShortcutsText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#54a9f7',
+  },
+  
   chatInputContainer: {
     flexDirection: 'row',
     padding: 16,
