@@ -45,3 +45,8 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Documentation and script files (keep only essential ones)
+*.md
+!README.md
+*.ps1
