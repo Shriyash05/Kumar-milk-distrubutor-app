@@ -157,6 +157,16 @@ export default function MyOrdersScreen({ navigation }) {
         0
       );
       const proof = items.find((i) => i.paymentProof)?.paymentProof || null;
+      
+      // Debug payment proof structure
+      if (proof) {
+        console.log('🖼️ Payment proof found for group:', {
+          groupId: groupId.substring(0, 50) + '...',
+          proofType: typeof proof,
+          proofStructure: proof,
+          imageUri: typeof proof === 'object' ? proof.imageUri : proof
+        });
+      }
       return {
         groupId,
         orders: items,
@@ -197,6 +207,12 @@ export default function MyOrdersScreen({ navigation }) {
     <TouchableOpacity
       style={styles.groupCard}
       onPress={() => {
+        console.log('🔍 Modal opening for group:', {
+          groupId: group.groupId.substring(0, 50) + '...',
+          hasProof: !!group.proof,
+          proofType: typeof group.proof,
+          proofValue: group.proof
+        });
         setSelectedGroup(group);
         setShowDetails(true);
         setProofLoading(true);
@@ -269,13 +285,49 @@ export default function MyOrdersScreen({ navigation }) {
               {selectedGroup?.proof && (
                 <View style={{ marginTop: 10 }}>
                   <Text style={{ fontWeight: "bold" }}>Payment Proof:</Text>
+                  <Text style={{ fontSize: 12, color: '#666', marginBottom: 5 }}>
+                    {typeof selectedGroup.proof === 'object' 
+                      ? `Image: ${selectedGroup.proof.imageUri ? 'Available' : 'Missing URI'}` 
+                      : `URI: ${selectedGroup.proof ? 'Available' : 'Missing'}`}
+                  </Text>
                   {proofLoading && <ActivityIndicator size="small" color="#333" />}
-                  <Image
-                    source={{ uri: selectedGroup.proof }}
-                    style={styles.proofImage}
-                    resizeMode="contain"
-                    onLoadEnd={() => setProofLoading(false)}
-                  />
+                  <TouchableOpacity 
+                    style={styles.proofImageContainer}
+                    onPress={() => {
+                      const imageUri = typeof selectedGroup.proof === 'object' && selectedGroup.proof.imageUri 
+                        ? selectedGroup.proof.imageUri 
+                        : selectedGroup.proof;
+                      console.log('🖼️ Payment proof image tapped:', imageUri);
+                      // Could add full screen view here in future
+                    }}
+                  >
+                    <Image
+                      source={{ 
+                        uri: typeof selectedGroup.proof === 'object' && selectedGroup.proof.imageUri 
+                          ? selectedGroup.proof.imageUri 
+                          : selectedGroup.proof 
+                      }}
+                      style={styles.proofImage}
+                      resizeMode="contain"
+                      onLoadStart={() => {
+                        console.log('🖼️ Loading payment proof image...');
+                        setProofLoading(true);
+                      }}
+                      onLoadEnd={() => {
+                        console.log('✅ Payment proof image loaded successfully');
+                        setProofLoading(false);
+                      }}
+                      onError={(error) => {
+                        console.log('❌ Payment proof image load error:', error.nativeEvent);
+                        setProofLoading(false);
+                      }}
+                    />
+                  </TouchableOpacity>
+                  {!proofLoading && (
+                    <Text style={{ fontSize: 12, color: '#999', marginTop: 5 }}>
+                      Tap image to view full size
+                    </Text>
+                  )}
                 </View>
               )}
             </ScrollView>
@@ -325,4 +377,11 @@ const styles = StyleSheet.create({
   modalItems: { paddingHorizontal: 12, paddingVertical: 8 },
   modalFooter: { padding: 12, borderTopWidth: 1, borderTopColor: "#ccc" },
   proofImage: { width: "100%", height: 200, marginTop: 6 },
+  proofImageContainer: {
+    borderWidth: 1,
+    borderColor: "#ddd",
+    borderRadius: 8,
+    overflow: "hidden",
+    marginTop: 6,
+  },
 });
